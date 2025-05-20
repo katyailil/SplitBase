@@ -1,66 +1,40 @@
-## Foundry
+# SplitBase
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Advanced on-chain revenue distribution system for Base network.
 
-Foundry consists of:
+## Overview
 
-- **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
-- **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
-- **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
-- **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+SplitBase provides programmable USDC payout splitting across multiple recipients using upgradeable smart contracts. Built for production treasury infrastructure on Base L2.
 
-## Documentation
+## Architecture
 
-https://book.getfoundry.sh/
+- **Core Pool Logic**: Dynamic recipient configurations with percentage/unit-based shares
+- **Registry**: Centralized pool management and discovery
+- **Executor**: Base Pay integration for automated execution flows
+- **Upgradeability**: UUPS proxy pattern with static addresses
 
-## Usage
+## Features
 
-### Build
+- Create and manage payout pools with flexible share models
+- Execute distribution cycles with precise accounting
+- Support for Base smart wallets and sub-accounts
+- Full upgradeability without address changes
+- Event emissions optimized for Subgraph indexing
 
-```shell
-$ forge build
+## Development
+
+```bash
+forge build
+forge test
+forge test --gas-report
 ```
 
-### Test
+## Deployment
 
-```shell
-$ forge test
+```bash
+forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify
 ```
 
-### Format
+## License
 
-```shell
-$ forge fmt
-```
-
-### Gas Snapshots
-
-```shell
-$ forge snapshot
-```
-
-### Anvil
-
-```shell
-$ anvil
-```
-
-### Deploy
-
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+MIT
