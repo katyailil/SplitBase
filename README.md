@@ -6,6 +6,8 @@ Advanced on-chain revenue distribution system for Base network.
 
 SplitBase provides programmable USDC payout splitting across multiple recipients using upgradeable smart contracts. Built for production treasury infrastructure on Base L2.
 
+High-precision share calculations ensure accurate distribution across all recipients with minimal rounding errors.
+
 ## Architecture
 
 - **Core Pool Logic**: Dynamic recipient configurations with percentage/unit-based shares
