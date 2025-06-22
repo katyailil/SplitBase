@@ -29,6 +29,7 @@ High-precision share calculations ensure accurate distribution across all recipi
 forge build
 forge test
 forge test --gas-report
+forge snapshot
 ```
 
 ## Deployment
