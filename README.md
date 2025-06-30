@@ -22,6 +22,7 @@ High-precision share calculations ensure accurate distribution across all recipi
 - Support for Base smart wallets and sub-accounts
 - Full upgradeability without address changes
 - Event emissions optimized for Subgraph indexing
+- Gas-optimized execution for cost-effective operations
 
 ## Development
 
