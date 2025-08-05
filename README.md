@@ -35,6 +35,15 @@ forge snapshot
 
 ## Deployment
 
+### Setup
+
+```bash
+cp .env.example .env
+# Add your PRIVATE_KEY and BASESCAN_API_KEY
+```
+
+### Deploy
+
 ```bash
 forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify
 ```
