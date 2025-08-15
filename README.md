@@ -48,6 +48,10 @@ cp .env.example .env
 forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify
 ```
 
+## Security
+
+For security concerns, please contact the team directly.
+
 ## License
 
 MIT
