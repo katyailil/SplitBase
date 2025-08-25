@@ -5,3 +5,5 @@ broadcast/
 .DS_Store
 lib/
 lcov.info
+.vscode/
+.idea/
