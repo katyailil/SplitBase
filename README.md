@@ -8,6 +8,12 @@ SplitBase provides programmable USDC payout splitting across multiple recipients
 
 High-precision share calculations ensure accurate distribution across all recipients with minimal rounding errors.
 
+## Key Benefits
+
+- **No Intermediaries**: Direct on-chain distribution without trust assumptions
+- **Transparent**: All operations recorded on Base blockchain
+- **Efficient**: Optimized gas usage for frequent distributions
+
 ## Architecture
 
 - **Core Pool Logic**: Dynamic recipient configurations with percentage/unit-based shares
