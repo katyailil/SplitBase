@@ -1,0 +1,40 @@
+name: Deploy Upgradeable Proxy
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'Network to deploy to'
+        required: true
+        type: choice
+        options:
+          - base_sepolia
+          - base
+
+jobs:
+  deploy-proxy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Deploy proxy implementation
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+        run: |
+          forge script script/DeployProxy.s.sol \
+            --rpc-url ${{ inputs.network }} \
+            --broadcast \
+            --verify \
+            -vvvv
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: proxy-deployment-${{ inputs.network }}
+          path: broadcast/

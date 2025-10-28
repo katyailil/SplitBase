@@ -1,0 +1,49 @@
+name: Upgrade Contract
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'Network'
+        required: true
+        type: choice
+        options:
+          - base_sepolia
+          - base
+      proxy_address:
+        description: 'Proxy contract address'
+        required: true
+
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Deploy new implementation
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+          PROXY_ADDRESS: ${{ inputs.proxy_address }}
+        run: |
+          echo "Deploying new implementation..."
+          forge script script/DeployProxy.s.sol \
+            --rpc-url ${{ inputs.network }} \
+            --broadcast \
+            --verify \
+            -vvvv
+
+          echo "⚠️  Manual upgrade required:"
+          echo "Call upgradeToAndCall() on proxy at $PROXY_ADDRESS"
+          echo "with new implementation address from deployment"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: upgrade-${{ inputs.network }}
+          path: broadcast/
