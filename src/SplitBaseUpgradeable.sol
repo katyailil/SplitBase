@@ -1,77 +1,58 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Initializable} from "openzeppelin-contracts-upgradeable/contracts/proxy/utils/Initializable.sol";
-import {UUPSUpgradeable} from "openzeppelin-contracts-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
-import {OwnableUpgradeable} from "openzeppelin-contracts-upgradeable/contracts/access/OwnableUpgradeable.sol";
+/**
+ * @title SplitBaseUpgradeable
+ * @notice Base upgradeable contract for SplitBase project.
+ * @dev This contract contains minimal storage and initialization logic.
+ * Future implementations (V1, V2, ...) must preserve storage layout.
+ */
 
-/// @title SplitBaseUpgradeable - UUPS upgradeable revenue splitter for Base
-contract SplitBaseUpgradeable is Initializable, UUPSUpgradeable, OwnableUpgradeable {
-    address[] private recipients;
-    uint256[] private shares; // permille, sum = 1000
-    uint256 public constant TOTAL_SHARES = 1000;
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-    mapping(address => uint256) public released;
-    uint256 public totalReceived;
+contract SplitBaseUpgradeable is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+    // ==============================
+    // Storage
+    // ==============================
 
-    error InvalidParams();
-    error NothingToRelease();
+    // Example storage variable (to ensure correct layout)
+    uint256 internal _version;
 
-    event PaymentReceived(address indexed from, uint256 amount);
-    event PaymentReleased(address indexed to, uint256 amount);
+    // ==============================
+    // Initialization
+    // ==============================
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
 
-    function initialize(address[] memory _recipients, uint256[] memory _shares, address initialOwner) public initializer {
+    /**
+     * @notice Initializes base ownership and version number.
+     * @dev Can only be called once (initializer).
+     */
+    function initialize() public initializer {
+        __Ownable_init(msg.sender);
         __UUPSUpgradeable_init();
-        __Ownable_init(initialOwner);
-
-        if (_recipients.length == 0 || _recipients.length != _shares.length) revert InvalidParams();
-        uint256 sum;
-        for (uint256 i; i < _recipients.length; i++) {
-            if (_recipients[i] == address(0) || _shares[i] == 0) revert InvalidParams();
-            recipients.push(_recipients[i]);
-            shares.push(_shares[i]);
-            sum += _shares[i];
-        }
-        if (sum != TOTAL_SHARES) revert InvalidParams();
+        _version = 1;
     }
 
-    receive() external payable {
-        totalReceived += msg.value;
-        emit PaymentReceived(msg.sender, msg.value);
+    // ==============================
+    // UUPS Upgrade Authorization
+    // ==============================
+
+    /**
+     * @dev Authorizes contract upgrades. Restricted to owner.
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+
+    // ==============================
+    // Helpers
+    // ==============================
+
+    function getVersion() external view returns (uint256) {
+        return _version;
     }
-
-    function pending(address account) public view returns (uint256) {
-        uint256 idx = _indexOf(account);
-        uint256 entitled = (totalReceived * shares[idx]) / TOTAL_SHARES;
-        return entitled - released[account];
-    }
-
-    function release(address payable account) public {
-        uint256 amount = pending(account);
-        if (amount == 0) revert NothingToRelease();
-        released[account] += amount;
-        (bool ok, ) = account.call{value: amount}("");
-        require(ok, "Transfer failed");
-        emit PaymentReleased(account, amount);
-    }
-
-    function getRecipients() external view returns (address[] memory, uint256[] memory) {
-        return (recipients, shares);
-    }
-
-    function _indexOf(address account) internal view returns (uint256) {
-        for (uint256 i; i < recipients.length; i++) {
-            if (recipients[i] == account) return i;
-        }
-        revert("Not a recipient");
-    }
-
-    function _authorizeUpgrade(address) internal override onlyOwner {}
-
-    uint256[50] private __gap;
 }
