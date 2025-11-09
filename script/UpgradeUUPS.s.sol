@@ -8,6 +8,10 @@ interface IUUPS {
     function upgradeTo(address newImplementation) external;
 }
 
+interface ISplitBaseV1 {
+    function initialize(address[] memory recs, uint256[] memory shrs, address owner) external;
+}
+
 contract UpgradeUUPS is Script {
     function run() external {
         address proxy = vm.envAddress("PROXY_ADDRESS");
@@ -23,7 +27,7 @@ contract UpgradeUUPS is Script {
         // 2) Call upgrade on the proxy (owner required)
         IUUPS(proxy).upgradeTo(address(newImpl));
         // 3) Initialize new implementation's state on proxy
-        SplitBaseV1(proxy).initialize(recs, shrs, msg.sender);
+        ISplitBaseV1(proxy).initialize(recs, shrs, msg.sender);
         vm.stopBroadcast();
 
         console2.log("New implementation:", address(newImpl));
