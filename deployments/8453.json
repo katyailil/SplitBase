@@ -1,8 +1,8 @@
 {
   "network": "base",
   "chainId": 8453,
-  "proxy": "",
-  "implementation": "",
+  "proxy": "0xd59d94632381bb206667d1cc594db412193e27b1",
+  "implementation": "0x9fad7fe258a4a14b043fcd8a9febc3fd071aa529",
   "txHashProxy": "",
   "txHashImpl": "",
   "blockNumber": 0,
