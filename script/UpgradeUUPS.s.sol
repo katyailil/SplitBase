@@ -14,14 +14,10 @@ interface ISplitBaseV1 {
 
 contract UpgradeUUPS is Script {
     function run() external {
-        // ✅ Меняй переменную ENV_NETWORK при запуске: "SEPOLIA" или "MAINNET"
         string memory network = vm.envString("ENV_NETWORK");
-
-        // Подтягиваем адрес прокси по сети
         string memory proxyKey = string.concat("PROXY_ADDRESS_", network);
         address proxy = vm.envAddress(proxyKey);
 
-        // Получаем получателей и доли
         string memory recCsv = vm.envString("RECIPIENTS");
         string memory shrCsv = vm.envString("SHARES");
 
@@ -29,16 +25,9 @@ contract UpgradeUUPS is Script {
         uint256[] memory shrs = _parseUints(shrCsv);
 
         vm.startBroadcast();
-
-        // 1) Deploy new implementation
         SplitBaseV1 newImpl = new SplitBaseV1();
-
-        // 2) Upgrade proxy to new implementation
         IUUPS(proxy).upgradeTo(address(newImpl));
-
-        // 3) Initialize logic on proxy (reinitializer(2))
         ISplitBaseV1(proxy).initialize(recs, shrs, msg.sender);
-
         vm.stopBroadcast();
 
         console2.log("New implementation deployed:", address(newImpl));
