@@ -14,7 +14,14 @@ interface ISplitBaseV1 {
 
 contract UpgradeUUPS is Script {
     function run() external {
-        address proxy = vm.envAddress("PROXY_ADDRESS");
+        // ✅ Меняй переменную ENV_NETWORK при запуске: "SEPOLIA" или "MAINNET"
+        string memory network = vm.envString("ENV_NETWORK");
+
+        // Подтягиваем адрес прокси по сети
+        string memory proxyKey = string.concat("PROXY_ADDRESS_", network);
+        address proxy = vm.envAddress(proxyKey);
+
+        // Получаем получателей и доли
         string memory recCsv = vm.envString("RECIPIENTS");
         string memory shrCsv = vm.envString("SHARES");
 
@@ -22,47 +29,62 @@ contract UpgradeUUPS is Script {
         uint256[] memory shrs = _parseUints(shrCsv);
 
         vm.startBroadcast();
-        // 1) Deploy new implementation (SplitBaseV1)
+
+        // 1) Deploy new implementation
         SplitBaseV1 newImpl = new SplitBaseV1();
-        // 2) Call upgrade on the proxy (owner required)
+
+        // 2) Upgrade proxy to new implementation
         IUUPS(proxy).upgradeTo(address(newImpl));
-        // 3) Initialize new implementation's state on proxy
+
+        // 3) Initialize logic on proxy (reinitializer(2))
         ISplitBaseV1(proxy).initialize(recs, shrs, msg.sender);
+
         vm.stopBroadcast();
 
-        console2.log("New implementation:", address(newImpl));
-        console2.log("Upgraded proxy:", proxy);
+        console2.log("New implementation deployed:", address(newImpl));
+        console2.log("Proxy upgraded:", proxy);
     }
 
     function _parseAddresses(string memory csv) internal pure returns (address[] memory) {
         string[] memory parts = _split(csv);
         address[] memory out = new address[](parts.length);
-        for (uint256 i; i < parts.length; i++) out[i] = vm.parseAddress(parts[i]);
+        for (uint256 i; i < parts.length; i++) {
+            out[i] = vm.parseAddress(parts[i]);
+        }
         return out;
     }
 
     function _parseUints(string memory csv) internal pure returns (uint256[] memory) {
         string[] memory parts = _split(csv);
         uint256[] memory out = new uint256[](parts.length);
-        for (uint256 i; i < parts.length; i++) out[i] = vm.parseUint(parts[i]);
+        for (uint256 i; i < parts.length; i++) {
+            out[i] = vm.parseUint(parts[i]);
+        }
         return out;
     }
 
     function _split(string memory s) internal pure returns (string[] memory) {
         bytes memory b = bytes(s);
         uint256 count;
-        for (uint256 i; i < b.length; i++) if (b[i] == ",") count++;
+        for (uint256 i; i < b.length; i++) {
+            if (b[i] == ",") count++;
+        }
+
         string[] memory parts = new string[](count + 1);
         uint256 last;
         uint256 p;
+
         for (uint256 i; i <= b.length; i++) {
             if (i == b.length || b[i] == ",") {
                 bytes memory chunk = new bytes(i - last);
-                for (uint256 j; j < chunk.length; j++) chunk[j] = b[last + j];
+                for (uint256 j; j < chunk.length; j++) {
+                    chunk[j] = b[last + j];
+                }
                 parts[p++] = string(chunk);
                 last = i + 1;
             }
         }
+
         return parts;
     }
 }
