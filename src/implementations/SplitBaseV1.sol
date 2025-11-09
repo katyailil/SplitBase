@@ -7,9 +7,10 @@ pragma solidity ^0.8.24;
  * @dev Storage layout must remain append-only across versions. Keep variables order intact.
  *
  * Storage layout (must match prior implementation order):
+ * 0) _version
  * 1) recipients
  * 2) shares
- * 3) TOTAL_SHARES (constant)
+ * 3) TOTAL_SHARES
  * 4) released
  * 5) totalReceived
  *
@@ -25,6 +26,7 @@ contract SplitBaseV1 is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     // Storage (keep order!)
     // -------------------------
 
+    uint256 internal _version;
     address[] public recipients;
     uint256[] public shares; // permille; must sum to TOTAL_SHARES
     uint256 public constant TOTAL_SHARES = 1000;
@@ -39,6 +41,8 @@ contract SplitBaseV1 is Initializable, OwnableUpgradeable, UUPSUpgradeable {
     error InvalidParams();
     error NothingToRelease();
     error NotARecipient();
+
+    error TransferFailed();
 
     event PaymentReceived(address indexed from, uint256 amount);
     event PaymentReleased(address indexed to, uint256 amount);
@@ -62,9 +66,11 @@ contract SplitBaseV1 is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         address[] memory _recipients,
         uint256[] memory _shares,
         address initialOwner
-    ) public initializer {
+    ) public reinitializer(2) {
         __UUPSUpgradeable_init();
-        __Ownable_init(initialOwner);
+        if (owner() == address(0)) {
+            __Ownable_init(initialOwner);
+        }
 
         if (_recipients.length == 0 || _recipients.length != _shares.length) revert InvalidParams();
 
@@ -76,9 +82,14 @@ contract SplitBaseV1 is Initializable, OwnableUpgradeable, UUPSUpgradeable {
             sum += _shares[i];
         }
         if (sum != TOTAL_SHARES) revert InvalidParams();
+        _version = 2;
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    function getVersion() external view returns (uint256) {
+        return _version;
+    }
 
     // -------------------------
     // Core logic
@@ -104,7 +115,7 @@ contract SplitBaseV1 is Initializable, OwnableUpgradeable, UUPSUpgradeable {
         released[account] += amount;
 
         (bool ok, ) = account.call{value: amount}("");
-        require(ok, "Transfer failed");
+        if (!ok) revert TransferFailed();
         emit PaymentReleased(account, amount);
     }
 
