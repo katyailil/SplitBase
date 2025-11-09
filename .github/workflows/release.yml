@@ -1,24 +1,35 @@
 name: release
+
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: version tag
+        description: version tag (e.g. v0.1.0)
         required: true
         default: v0.1.0
+
+permissions:
+  contents: write
+
 jobs:
   make-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: List deployment files
+        run: |
+          ls -la deployments || true
+
       - name: Create pre-release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
           prerelease: true
-          files: artifacts/**/*
+          files: |
+            deployments/8453.json
+            deployments/84532.json
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
