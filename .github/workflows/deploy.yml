@@ -1,93 +1,56 @@
-name: Deploy UUPS to Base
-
+name: deploy
 on:
   workflow_dispatch:
     inputs:
       network:
-        description: "Where to deploy"
-        type: choice
-        options: [sepolia, mainnet]
-        default: sepolia
-      recipients:
-        description: "CSV of recipients (optional, overrides VARS)"
-        required: false
-      shares:
-        description: "CSV of shares in permille (optional, overrides VARS)"
-        required: false
-
+        description: base or basesepolia
+        required: true
+        default: basesepolia
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
-
-      - name: Install dependencies (OZ + forge-std)
+      - name: Set RPC
+        id: net
         run: |
-          mkdir -p lib
-          forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2
-          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2
-          forge install foundry-rs/forge-std
-
-      - name: Set env (RPC, CHAIN_ID, RECIPIENTS, SHARES)
-        shell: bash
+          if [ "${{ github.event.inputs.network }}" = "base" ]; then
+            echo "RPC=${{ secrets.RPC_BASE }}" >> $GITHUB_OUTPUT
+            echo "CID=8453" >> $GITHUB_OUTPUT
+            echo "DEP=deployments/8453.json" >> $GITHUB_OUTPUT
+          else
+            echo "RPC=${{ secrets.RPC_BASE_SEPOLIA }}" >> $GITHUB_OUTPUT
+            echo "CID=84532" >> $GITHUB_OUTPUT
+            echo "DEP=deployments/84532.json" >> $GITHUB_OUTPUT
+          fi
+      - name: Install deps
         run: |
-          if [ "${{ github.event.inputs.network }}" = "sepolia" ]; then
-            echo "RPC_URL=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_ENV
-            echo "CHAIN_ID=84532" >> $GITHUB_ENV
-          else
-            echo "RPC_URL=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_ENV
-            echo "CHAIN_ID=8453" >> $GITHUB_ENV
-          fi
-
-          # RECIPIENTS fallback: input > repo VARS
-          if [ -n "${{ github.event.inputs.recipients }}" ]; then
-            echo "RECIPIENTS=${{ github.event.inputs.recipients }}" >> $GITHUB_ENV
-          else
-            echo "RECIPIENTS=${{ vars.RECIPIENTS }}" >> $GITHUB_ENV
-          fi
-
-          # SHARES fallback: input > repo VARS
-          if [ -n "${{ github.event.inputs.shares }}" ]; then
-            echo "SHARES=${{ github.event.inputs.shares }}" >> $GITHUB_ENV
-          else
-            echo "SHARES=${{ vars.SHARES }}" >> $GITHUB_ENV
-          fi
-
-      - name: Build
-        run: forge build -vv
-
-      - name: Deploy (implementation + ERC1967Proxy)
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+      - name: Deploy proxy
         env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PRIVATE_KEY: ${{ secrets.PK }}
+          ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
         run: |
-          echo "RECIPIENTS=$RECIPIENTS"
-          echo "SHARES=$SHARES"
-          forge script script/DeployUUPS.s.sol:DeployUUPS \
-            --rpc-url "$RPC_URL" \
+          forge script script/Deploy.s.sol:Deploy \
+            --rpc-url "$RPC_URL" --broadcast --verify \
             --private-key "$PRIVATE_KEY" \
-            --broadcast
-
-      # Достаём адреса из broadcast JSON
-      - name: Extract addresses
-        id: addrs
-        run: |
-          FILE="broadcast/DeployUUPS.s.sol/$CHAIN_ID/run-latest.json"
-          echo "Using $FILE"
-          IMPL=$(jq -r '.transactions[] | select(.contractName=="SplitBaseUpgradeable") | .contractAddress' "$FILE" | tail -n 1)
-          PROXY=$(jq -r '.transactions[] | select(.contractName=="ERC1967Proxy") | .contractAddress' "$FILE" | tail -n 1)
-          echo "Implementation: $IMPL"
-          echo "Proxy: $PROXY"
-          echo "implementation=$IMPL" >> $GITHUB_OUTPUT
-          echo "proxy=$PROXY" >> $GITHUB_OUTPUT
-
-      - name: Summary
-        run: |
-          echo "### Deploy results (${{ github.event.inputs.network }})" >> $GITHUB_STEP_SUMMARY
-          echo "- Implementation: \`${{ steps.addrs.outputs.implementation }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- Proxy: \`${{ steps.addrs.outputs.proxy }}\`" >> $GITHUB_STEP_SUMMARY
+            --sig "run()" > out.txt
+          IMPL=$(grep -i "Deployed implementation" -i out.txt | awk '{print $NF}')
+          PROXY=$(grep -i "Deployed proxy" -i out.txt | awk '{print $NF}')
+          TXI=$(grep -i "implementation tx:" -i out.txt | awk '{print $NF}')
+          TXP=$(grep -i "proxy tx:" -i out.txt | awk '{print $NF}')
+          BN=$(cast block-number --rpc-url "$RPC_URL")
+          jq --arg p "$PROXY" --arg i "$IMPL" --arg txp "$TXP" --arg txi "$TXI" --argjson bn $BN \
+             '.proxy=$p | .implementation=$i | .txHashProxy=$txp | .txHashImpl=$txi | .blockNumber=$bn | .verified=true | .updatedAt=now|toISOString' \
+             "${{ steps.net.outputs.DEP }}" > tmp.json
+          mv tmp.json "${{ steps.net.outputs.DEP }}"
+      - name: Upload deployment files
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployments-${{ github.event.inputs.network }}
+          path: deployments/*.json
