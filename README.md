@@ -1,23 +1,31 @@
-# SplitBase (UUPS Upgradeable)
+# SplitBase
 
-A minimal, upgradeable revenue splitter for the **Base** network (L2, Coinbase).  
-Recipients withdraw their share on demand; shares are set in permille (sum = 1000).
+On-chain revenue splitter on Base with upgradeable proxy (UUPS). Funds sent to the proxy are split by predefined shares; recipients withdraw on demand.
 
----
+## Networks
 
-## How it works
+- Base Mainnet — see `deployments/8453.json`  
+- Base Sepolia — see `deployments/84532.json`
 
-Anyone can send ETH to the proxy (the contract receives funds).  
-Recipients withdraw using `release(<address>)`, which transfers their accrued share.
+## Deploy
 
-- Shares are in **permille** (e.g., `600,400` = 60%/40%).  
-- The sum of all `SHARES` must be exactly **1000**.
+1. Add secrets: `PK`, `RPC_BASE`, `RPC_BASE_SEPOLIA`, `BASESCAN_API_KEY`.
+2. Run workflow **deploy** with input `basesepolia` or `base`.
+3. Download artifacts and check `deployments/*.json`.
 
-## Security Notes
+## Upgrade
 
-No third-party audit. Use at your own risk.
-For production, set the proxy owner to a Gnosis Safe (multisig).
-Preserve storage layout for upgrades.
+Use a CI job that calls the upgrade script and updates `implementation` and `txHashImpl` in `deployments/*.json`.
 
-##License
-MIT © 2025
+## Contract
+
+- Pattern: UUPS
+- Storage: keep layout stable across upgrades
+- Shares: permille, sum must be 1000
+- Functions: `release(address)`
+
+## Integrations (next)
+
+- Base Pay API
+- Base Account SDK
+- OnchainKit UI
