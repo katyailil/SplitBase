@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
-import {SplitBaseUpgradeable} from "../src/SplitBaseUpgradeable.sol";
+import {SplitBaseV1} from "../src/implementations/SplitBaseV1.sol";
 
 interface IUUPS {
     function upgradeTo(address newImplementation) external;
@@ -11,15 +11,54 @@ interface IUUPS {
 contract UpgradeUUPS is Script {
     function run() external {
         address proxy = vm.envAddress("PROXY_ADDRESS");
+        string memory recCsv = vm.envString("RECIPIENTS");
+        string memory shrCsv = vm.envString("SHARES");
+
+        address[] memory recs = _parseAddresses(recCsv);
+        uint256[] memory shrs = _parseUints(shrCsv);
 
         vm.startBroadcast();
-        // 1) Deploy new implementation (could be a V2 contract)
-        SplitBaseUpgradeable newImpl = new SplitBaseUpgradeable();
+        // 1) Deploy new implementation (SplitBaseV1)
+        SplitBaseV1 newImpl = new SplitBaseV1();
         // 2) Call upgrade on the proxy (owner required)
         IUUPS(proxy).upgradeTo(address(newImpl));
+        // 3) Initialize new implementation's state on proxy
+        SplitBaseV1(proxy).initialize(recs, shrs, msg.sender);
         vm.stopBroadcast();
 
         console2.log("New implementation:", address(newImpl));
         console2.log("Upgraded proxy:", proxy);
+    }
+
+    function _parseAddresses(string memory csv) internal pure returns (address[] memory) {
+        string[] memory parts = _split(csv);
+        address[] memory out = new address[](parts.length);
+        for (uint256 i; i < parts.length; i++) out[i] = vm.parseAddress(parts[i]);
+        return out;
+    }
+
+    function _parseUints(string memory csv) internal pure returns (uint256[] memory) {
+        string[] memory parts = _split(csv);
+        uint256[] memory out = new uint256[](parts.length);
+        for (uint256 i; i < parts.length; i++) out[i] = vm.parseUint(parts[i]);
+        return out;
+    }
+
+    function _split(string memory s) internal pure returns (string[] memory) {
+        bytes memory b = bytes(s);
+        uint256 count;
+        for (uint256 i; i < b.length; i++) if (b[i] == ",") count++;
+        string[] memory parts = new string[](count + 1);
+        uint256 last;
+        uint256 p;
+        for (uint256 i; i <= b.length; i++) {
+            if (i == b.length || b[i] == ",") {
+                bytes memory chunk = new bytes(i - last);
+                for (uint256 j; j < chunk.length; j++) chunk[j] = b[last + j];
+                parts[p++] = string(chunk);
+                last = i + 1;
+            }
+        }
+        return parts;
     }
 }
