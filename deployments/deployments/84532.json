@@ -1,0 +1,13 @@
+{
+  "network": "basesepolia",
+  "chainId": 84532,
+  "proxy": "",
+  "implementation": "",
+  "txHashProxy": "",
+  "txHashImpl": "",
+  "blockNumber": 0,
+  "contract": "SplitBase",
+  "pattern": "UUPS",
+  "verified": false,
+  "updatedAt": "2025-11-09T00:00:00Z"
+}
