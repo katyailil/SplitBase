@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 import {ERC1967Proxy} from "openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {SplitBaseUpgradeable} from "../src/SplitBaseUpgradeable.sol";
+import {SplitBaseV1} from "../src/implementations/SplitBaseV1.sol";
 
 contract DeployUUPS is Script {
     function run() external {
@@ -16,11 +16,11 @@ contract DeployUUPS is Script {
         vm.startBroadcast();
 
         // 1) Deploy implementation
-        SplitBaseUpgradeable impl = new SplitBaseUpgradeable();
+        SplitBaseV1 impl = new SplitBaseV1();
 
         // 2) Prepare init calldata
         bytes memory initData = abi.encodeWithSelector(
-            SplitBaseUpgradeable.initialize.selector,
+            SplitBaseV1.initialize.selector,
             recs,
             shrs,
             msg.sender // initialOwner
