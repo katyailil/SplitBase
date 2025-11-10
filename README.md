@@ -48,11 +48,29 @@ cp .env.example .env
 # Add your PRIVATE_KEY and BASESCAN_API_KEY
 ```
 
-### Deploy
+### Manual Deployment
 
+**Deploy to Base Sepolia:**
 ```bash
 forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify
 ```
+
+**Deploy upgradeable proxy:**
+```bash
+forge script script/DeployProxy.s.sol --rpc-url base_sepolia --broadcast --verify
+```
+
+**Upgrade existing proxy:**
+```bash
+PROXY_ADDRESS=0x... forge script script/Upgrade.s.sol --rpc-url base_sepolia --broadcast
+```
+
+### GitHub Actions Deployment
+
+Use workflow dispatch for automated deployments:
+- **Deploy**: Actions → Deploy to Base → Run workflow
+- **Deploy Proxy**: Actions → Deploy Upgradeable Proxy → Run workflow
+- **Upgrade**: Actions → Upgrade Contract → Run workflow
 
 ## Security
 
