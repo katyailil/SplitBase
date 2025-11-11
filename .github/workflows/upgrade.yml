@@ -25,7 +25,7 @@ jobs:
         with:
           version: nightly
 
-      - name: Install tools
+      - name: Install tools and deps
         run: |
           sudo apt-get update -y
           sudo apt-get install -y jq
@@ -54,19 +54,34 @@ jobs:
           else
             ADDR=$(jq -r '.proxy' "${{ steps.net.outputs.DEP }}")
           fi
-          echo "Candidate proxy: $ADDR"
           if [ -z "$ADDR" ] || [ "$ADDR" = "null" ]; then
             echo "Proxy address is empty"; exit 1;
           fi
-          LEN=${#ADDR}
-          if [ $LEN -ne 42 ]; then
-            echo "Invalid address length: $LEN (expected 42 incl. 0x)"; exit 1;
-          fi
           if ! echo "$ADDR" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then
-            echo "Invalid address format: $ADDR"; exit 1;
+            echo "Invalid proxy address: $ADDR"; exit 1;
           fi
           echo "PROXY=$ADDR" >> $GITHUB_ENV
           echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
+          echo "Candidate proxy: $ADDR"
+
+      - name: Check owner matches PRIVATE_KEY
+        id: ownercheck
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PROXY: ${{ steps.proxy.outputs.ADDR }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          set -e
+          SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
+          OWNER=$(cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "")
+          echo "Sender: $SENDER"
+          echo "Owner:  $OWNER"
+          if [ -z "$OWNER" ] || [ "$OWNER" = "0x0000000000000000000000000000000000000000" ]; then
+            echo "Cannot read owner() from proxy. Ensure implementation is Ownable UUPS."; exit 1;
+          fi
+          if [ "${OWNER,,}" != "${SENDER,,}" ]; then
+            echo "Private key is not the proxy owner. Aborting."; exit 1;
+          fi
 
       - name: Upgrade
         env:
@@ -88,10 +103,11 @@ jobs:
           if [ -z "$IMPL" ]; then
             IMPL=$(grep -E "^New implementation deployed:" out.txt | awk '{print $4}')
           fi
-          if [ -z "$IMPL" ]; then
+          if ! echo "$IMPL" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then
             echo "Implementation not found in logs"; cat out.txt; exit 1;
           fi
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
+          echo "New implementation: $IMPL"
 
       - name: Verify implementation
         env:
