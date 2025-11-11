@@ -1,8 +1,8 @@
 {
   "network": "basesepolia",
   "chainId": 84532,
-  "proxy": "0x8EE1563b6e10a764C24A46158f661e53D407771",
-  "implementation": "0x33A023649e69e89bF192e1367979eF1dB653d635",
+  "proxy": "0xd59d94632381bb206667d1cc594db412193e27b1",
+  "implementation": "0x9fad7fe258a4a14b043fcd8a9febc3fd071aa529",
   "txHashProxy": "",
   "txHashImpl": "",
   "blockNumber": 0,
