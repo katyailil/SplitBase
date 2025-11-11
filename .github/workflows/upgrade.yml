@@ -69,7 +69,7 @@ jobs:
       - name: Build
         run: forge build -vv
 
-      - name: Deploy new implementation (parse stdout)
+      - name: Deploy new implementation (broadcast + parse stdout)
         id: create
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
@@ -78,7 +78,7 @@ jobs:
           forge create src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
             --rpc-url "$RPC_URL" \
             --private-key "$PRIVATE_KEY" \
-            -vvv | tee create.log
+            --broadcast -vvv | tee create.log
 
           IMPL=$(awk '/Deployed to: /{print $3}' create.log | tail -n1 | tr -d '\r\n')
           TX=$(awk '/Transaction hash: /{print $3}' create.log | tail -n1 | tr -d '\r\n')
