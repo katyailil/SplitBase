@@ -102,7 +102,7 @@ jobs:
             --chain ${{ steps.net.outputs.CID }} \
             --watch
 
-      - name: Upgrade proxy (auto-detect admin)
+      - name: Upgrade proxy (robust)
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
@@ -112,20 +112,34 @@ jobs:
           set -e
           SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
 
-          CURRENT_ADMIN=$(cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" 2>/dev/null || echo "")
-          if echo "$CURRENT_ADMIN" | grep -Eq '^0x[0-9a-fA-F]{40}$' && [ "${CURRENT_ADMIN,,}" != "0x0000000000000000000000000000000000000000" ]; then
-            echo "Admin already set ($CURRENT_ADMIN); using upgradeTo(address)"
-            cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
-              --rpc-url "$RPC_URL" \
-              --private-key "$PRIVATE_KEY" \
-              --legacy -vvvv
+          echo "Attempt 1: upgradeTo(address)"
+          if cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
+               --rpc-url "$RPC_URL" \
+               --private-key "$PRIVATE_KEY" \
+               --legacy -vvvv 2>upgrade1.err; then
+            echo "upgradeTo success"
           else
-            echo "Admin not set; using upgradeToAndCall(address,bytes) with bootstrapAdmin(admin)"
+            echo "upgradeTo failed, trying upgradeToAndCall..."
             INIT=$(cast calldata "bootstrapAdmin(address)" "$SENDER")
-            cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" \
-              --rpc-url "$RPC_URL" \
-              --private-key "$PRIVATE_KEY" \
-              --legacy -vvvv
+            if cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" \
+                 --rpc-url "$RPC_URL" \
+                 --private-key "$PRIVATE_KEY" \
+                 --legacy -vvvv 2>upgrade2.err; then
+              echo "upgradeToAndCall success"
+            else
+              if grep -qi "ADMIN_ALREADY_SET" upgrade2.err; then
+                echo "ADMIN_ALREADY_SET -> retry upgradeTo"
+                cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
+                  --rpc-url "$RPC_URL" \
+                  --private-key "$PRIVATE_KEY" \
+                  --legacy -vvvv
+              else
+                echo "Upgrade failed:"
+                cat upgrade1.err || true
+                cat upgrade2.err || true
+                exit 1
+              fi
+            fi
           fi
 
       - name: Update manifest
