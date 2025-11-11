@@ -102,7 +102,19 @@ jobs:
             --chain ${{ steps.net.outputs.CID }} \
             --watch
 
-      - name: Upgrade proxy (robust)
+      - name: Preflight checks (UUPS proxiableUUID)
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          IMPL: ${{ steps.create.outputs.IMPL }}
+        run: |
+          SLOT_REF="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+          UUID=$(cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" 2>/dev/null || echo "")
+          echo "IMPL proxiableUUID: $UUID"
+          if [ -z "$UUID" ] || [ "${UUID,,}" != "${SLOT_REF,,}" ]; then
+            echo "UUPS check failed: proxiableUUID mismatch"; exit 1;
+          fi
+
+      - name: Upgrade proxy (simulate + robust)
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
@@ -111,32 +123,28 @@ jobs:
         run: |
           set -e
           SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
-
-          echo "Attempt 1: upgradeTo(address)"
-          if cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
-               --rpc-url "$RPC_URL" \
-               --private-key "$PRIVATE_KEY" \
-               --legacy -vvvv 2>upgrade1.err; then
-            echo "upgradeTo success"
+          echo "Simulate upgradeTo(address)"
+          if cast call "$PROXY" "upgradeTo(address)" "$IMPL" --from "$SENDER" --rpc-url "$RPC_URL" 1>/dev/null 2>sim1.err; then
+            echo "Simulation OK -> sending upgradeTo"
+            cast send "$PROXY" "upgradeTo(address)" "$IMPL" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
           else
-            echo "upgradeTo failed, trying upgradeToAndCall..."
+            echo "Simulation reverted (upgradeTo). Reason (raw):"
+            cat sim1.err || true
+
+            echo "Simulate upgradeToAndCall(address,bytes) with bootstrapAdmin(SENDER)"
             INIT=$(cast calldata "bootstrapAdmin(address)" "$SENDER")
-            if cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" \
-                 --rpc-url "$RPC_URL" \
-                 --private-key "$PRIVATE_KEY" \
-                 --legacy -vvvv 2>upgrade2.err; then
-              echo "upgradeToAndCall success"
+            if cast call "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" --from "$SENDER" --rpc-url "$RPC_URL" 1>/dev/null 2>sim2.err; then
+              echo "Simulation OK -> sending upgradeToAndCall"
+              cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
             else
-              if grep -qi "ADMIN_ALREADY_SET" upgrade2.err; then
-                echo "ADMIN_ALREADY_SET -> retry upgradeTo"
-                cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
-                  --rpc-url "$RPC_URL" \
-                  --private-key "$PRIVATE_KEY" \
-                  --legacy -vvvv
+              if grep -qi "ADMIN_ALREADY_SET" sim2.err; then
+                echo "ADMIN_ALREADY_SET -> fallback to upgradeTo"
+                cast send "$PROXY" "upgradeTo(address)" "$IMPL" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
               else
-                echo "Upgrade failed:"
-                cat upgrade1.err || true
-                cat upgrade2.err || true
+                echo "Both paths reverted. upgradeTo(reason):"
+                cat sim1.err || true
+                echo "upgradeToAndCall(reason):"
+                cat sim2.err || true
                 exit 1
               fi
             fi
@@ -161,5 +169,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deployments/*.json
-          git commit -m "chore(deployments): record upgrade for ${{ github.event.inputs.network }}"
+          git commit -m "fix(ci): diagnostic UUPS upgrade with simulation and clear revert reasons"
           git push
