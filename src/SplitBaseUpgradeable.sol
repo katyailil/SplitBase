@@ -13,7 +13,6 @@ contract SplitBaseUpgradeable is Initializable, UUPSUpgradeable {
     function initialize(address admin_) external initializer {
         _admin = admin_;
         _version = 1;
-        __UUPSUpgradeable_init();
     }
 
     function bootstrapAdmin(address admin_) external {
