@@ -6,9 +6,7 @@ on:
       network:
         description: "Where to upgrade"
         type: choice
-        options:
-          - sepolia
-          - mainnet
+        options: [sepolia, mainnet]
         default: sepolia
         required: true
       rpc_url:
@@ -81,22 +79,34 @@ jobs:
       - name: build
         run: forge build -v
 
-      - name: deploy implementation
+      - name: deploy implementation (broadcast + json)
         id: impl
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           RPC_URL: ${{ steps.net.outputs.RPC }}
         run: |
           set -e
+          mkdir -p out/ci
           forge create src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
             --private-key "$PRIVATE_KEY" \
-            --rpc-url "$RPC_URL" | tee out.log
-          IMPL=$(awk '/Deployed to:/{print $3}' out.log)
-          if [ -z "$IMPL" ]; then
+            --rpc-url "$RPC_URL" \
+            --broadcast \
+            --json > out/ci/create.json
+
+          IMPL=$(jq -r '
+              .deployedTo
+              // .contracts[0].address
+              // .transactions[0].contractAddress
+              // .receipts[0].contractAddress
+              ' out/ci/create.json)
+
+          if [ -z "$IMPL" ] || [ "$IMPL" = "null" ]; then
+            echo "create.json:" && cat out/ci/create.json
             echo "Failed to detect implementation address"
             exit 1
           fi
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
+          echo "Implementation: $IMPL"
 
       - name: verify implementation
         env:
@@ -146,5 +156,5 @@ jobs:
           git config user.name github-actions
           git config user.email actions@github.com
           git add deployments/
-          git commit -m "chore(ci): restore network picker and upgrade to ${{ github.event.inputs.network }} (impl ${{ steps.impl.outputs.IMPL }})" || true
+          git commit -m "chore(ci): broadcast deploy and parse impl from JSON (impl ${{ steps.impl.outputs.IMPL }})" || true
           git push
