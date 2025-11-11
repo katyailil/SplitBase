@@ -64,26 +64,50 @@ jobs:
           echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
           echo "Candidate proxy: $ADDR"
 
+      - name: Detect implementation and UUPS capability
+        id: detect
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PROXY: ${{ steps.proxy.outputs.ADDR }}
+        run: |
+          SLOT=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
+          RAW=$(cast storage "$PROXY" "$SLOT" --rpc-url "$RPC_URL" | tail -n1)
+          IMPL=0x$(echo "$RAW" | tail -c 41)
+          echo "Current implementation: $IMPL"
+          echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
+
+          if ! echo "$IMPL" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then
+            echo "Failed to read implementation slot"; exit 1;
+          fi
+
+          if cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" >/dev/null 2>&1; then
+            echo "PATTERN=UUPS" >> $GITHUB_OUTPUT
+            echo "Detected UUPS-compatible implementation"
+          else
+            echo "PATTERN=NON_UUPS" >> $GITHUB_OUTPUT
+            echo "Implementation does not expose proxiableUUID() — not UUPS"
+          fi
+
       - name: Check owner matches PRIVATE_KEY
-        id: ownercheck
+        if: steps.detect.outputs.PATTERN == 'UUPS'
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PROXY: ${{ steps.proxy.outputs.ADDR }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
         run: |
-          set -e
           SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
           OWNER=$(cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "")
           echo "Sender: $SENDER"
           echo "Owner:  $OWNER"
           if [ -z "$OWNER" ] || [ "$OWNER" = "0x0000000000000000000000000000000000000000" ]; then
-            echo "Cannot read owner() from proxy. Ensure implementation is Ownable UUPS."; exit 1;
+            echo "owner() not readable via proxy; ensure your implementation inherits Ownable and exposes owner()"; exit 1;
           fi
           if [ "${OWNER,,}" != "${SENDER,,}" ]; then
             echo "Private key is not the proxy owner. Aborting."; exit 1;
           fi
 
-      - name: Upgrade
+      - name: Upgrade (UUPS path)
+        if: steps.detect.outputs.PATTERN == 'UUPS'
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
@@ -96,8 +120,19 @@ jobs:
             --sig "run()" \
             -vvvv > out.txt
 
+      - name: Fail for non-UUPS
+        if: steps.detect.outputs.PATTERN == 'NON_UUPS'
+        run: |
+          echo "This proxy's current implementation is NOT UUPS. upgradeTo() will always revert."
+          echo "Next steps:"
+          echo "1) Confirm proxy pattern (Transparent vs ERC1967 vs custom)."
+          echo "2) If Transparent, upgrade must be executed via ProxyAdmin contract."
+          echo "3) Provide PROXY_ADMIN address so we can add a transparent-upgrade workflow."
+          exit 1
+
       - name: Parse new implementation
         id: parse
+        if: steps.detect.outputs.PATTERN == 'UUPS'
         run: |
           IMPL=$(grep -E "^Implementation " out.txt | awk '{print $2}')
           if [ -z "$IMPL" ]; then
@@ -110,6 +145,7 @@ jobs:
           echo "New implementation: $IMPL"
 
       - name: Verify implementation
+        if: steps.detect.outputs.PATTERN == 'UUPS'
         env:
           ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
         run: |
@@ -120,6 +156,7 @@ jobs:
             --watch
 
       - name: Update manifest
+        if: steps.detect.outputs.PATTERN == 'UUPS'
         run: |
           BN=$(cast block-number --rpc-url "${{ steps.net.outputs.RPC }}")
           jq --arg i "${{ steps.parse.outputs.IMPL }}" --argjson bn $BN \
@@ -129,6 +166,7 @@ jobs:
           cat "${{ steps.net.outputs.DEP }}"
 
       - name: Commit manifest
+        if: steps.detect.outputs.PATTERN == 'UUPS'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
