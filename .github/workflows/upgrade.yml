@@ -54,12 +54,19 @@ jobs:
           else
             ADDR=$(jq -r '.proxy' "${{ steps.net.outputs.DEP }}")
           fi
+          echo "Candidate proxy: $ADDR"
           if [ -z "$ADDR" ] || [ "$ADDR" = "null" ]; then
             echo "Proxy address is empty"; exit 1;
           fi
-          echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
+          LEN=${#ADDR}
+          if [ $LEN -ne 42 ]; then
+            echo "Invalid address length: $LEN (expected 42 incl. 0x)"; exit 1;
+          fi
+          if ! echo "$ADDR" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then
+            echo "Invalid address format: $ADDR"; exit 1;
+          fi
           echo "PROXY=$ADDR" >> $GITHUB_ENV
-          echo "Using proxy: $ADDR"
+          echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
 
       - name: Upgrade
         env:
@@ -85,7 +92,6 @@ jobs:
             echo "Implementation not found in logs"; cat out.txt; exit 1;
           fi
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
-          echo "New implementation: $IMPL"
 
       - name: Verify implementation
         env:
