@@ -1,4 +1,4 @@
-name: upgrade
+name: upgrade-diagnose
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
         required: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   upgrade:
@@ -37,11 +37,9 @@ jobs:
         run: |
           if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
             echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
-            echo "CID=8453" >> $GITHUB_OUTPUT
             echo "DEP=deployments/8453.json" >> $GITHUB_OUTPUT
           else
             echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
-            echo "CID=84532" >> $GITHUB_OUTPUT
             echo "DEP=deployments/84532.json" >> $GITHUB_OUTPUT
           fi
 
@@ -52,14 +50,13 @@ jobs:
           if [ -z "$ADDR" ] || [ "$ADDR" = "null" ]; then echo "Proxy address is empty"; exit 1; fi
           if ! echo "$ADDR" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then echo "Invalid proxy address: $ADDR"; exit 1; fi
           echo "PROXY=$ADDR" >> $GITHUB_ENV
-          echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
           echo "Proxy: $ADDR"
 
       - name: Check owner matches PRIVATE_KEY
         id: who
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
-          PROXY: ${{ steps.proxy.outputs.ADDR }}
+          PROXY: ${{ env.PROXY }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
         run: |
           SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
@@ -70,108 +67,56 @@ jobs:
           if [ "${OWNER,,}" != "${SENDER,,}" ]; then echo "PRIVATE_KEY is not the proxy owner"; exit 1; fi
           echo "SENDER=$SENDER" >> $GITHUB_OUTPUT
 
-      - name: Read current implementation
+      - name: Read current implementation & UUID
         id: cur
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
-          PROXY: ${{ steps.proxy.outputs.ADDR }}
+          PROXY: ${{ env.PROXY }}
         run: |
           SLOT=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
           RAW=$(cast storage "$PROXY" "$SLOT" --rpc-url "$RPC_URL" | tail -n1)
           IMPL=0x$(echo "$RAW" | tail -c 41)
-          echo "CURRENT_IMPL=$IMPL" >> $GITHUB_OUTPUT
           echo "Current implementation: $IMPL"
-          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL"
+          echo "CURRENT_IMPL=$IMPL" >> $GITHUB_OUTPUT
+          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" || true
 
-      - name: Build
+      - name: Build new impl (no deploy)
         run: forge build -vv
 
-      - name: Deploy DummyUUPS
-        id: dummy
+      - name: Prepare calldata for upgradeTo(address)
+        id: cal
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          TARGET: ${{ steps.cur.outputs.CURRENT_IMPL }}
         run: |
-          forge create src/DummyUUPS.sol:DummyUUPS \
-            --rpc-url "$RPC_URL" \
-            --private-key "$PRIVATE_KEY" \
-            --broadcast -vvvv > dd.txt
-          DUMMY=$(grep -E "Deployed to:" dd.txt | awk '{print $3}')
-          echo "DUMMY=$DUMMY" >> $GITHUB_OUTPUT
-          echo "Dummy: $DUMMY"
+          DATA=$(cast calldata "upgradeTo(address)" "$TARGET")
+          echo "DATA=$DATA" >> $GITHUB_OUTPUT
+          echo "Calldata: $DATA"
 
-      - name: Simulate upgrade to Dummy
-        id: sim1
+      - name: eth_call to capture raw revert data
+        id: rc
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PROXY: ${{ env.PROXY }}
           FROM: ${{ steps.who.outputs.SENDER }}
-          DUMMY: ${{ steps.dummy.outputs.DUMMY }}
+          DATA: ${{ steps.cal.outputs.DATA }}
         run: |
           set +e
-          OUT=$(cast call "$PROXY" "upgradeTo(address)" "$DUMMY" --from "$FROM" --rpc-url "$RPC_URL" 2>&1)
-          CODE=$?
-          echo "$OUT"
+          RESP=$(cast rpc --rpc-url "$RPC_URL" eth_call "{\"from\":\"$FROM\",\"to\":\"$PROXY\",\"data\":\"$DATA\"}" latest 2>&1)
+          echo "$RESP"
+          # вытаскиваем поле "data":"0x...." из JSON ошибки
+          RDATA=$(echo "$RESP" | sed -n 's/.*"data":"\([^"]*\)".*/\1/p')
+          echo "RDATA=$RDATA" >> $GITHUB_OUTPUT
           set -e
-          if [ $CODE -ne 0 ]; then echo "Simulation to Dummy reverted above"; exit 1; fi
+          if [ -z "$RDATA" ]; then
+            echo "No revert data in RPC response"; exit 1;
+          fi
+          echo "Raw revert data: $RDATA"
 
-      - name: Upgrade to Dummy
+      - name: Decode revert selector
         env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          PROXY: ${{ env.PROXY }}
-          DUMMY: ${{ steps.dummy.outputs.DUMMY }}
+          RDATA: ${{ steps.rc.outputs.RDATA }}
         run: |
-          cast send "$PROXY" "upgradeTo(address)" "$DUMMY" \
-            --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
-
-      - name: Deploy real SplitBaseUpgradeable
-        id: newimpl
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-        run: |
-          forge create src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
-            --rpc-url "$RPC_URL" \
-            --private-key "$PRIVATE_KEY" \
-            --broadcast -vvvv > cr.txt
-          IMPL=$(grep -E "Deployed to:" cr.txt | awk '{print $3}')
-          echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
-          echo "New impl: $IMPL"
-
-      - name: Upgrade to real impl
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          PROXY: ${{ env.PROXY }}
-          IMPL: ${{ steps.newimpl.outputs.IMPL }}
-        run: |
-          cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
-            --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
-
-      - name: Verify implementation
-        env:
-          ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
-        run: |
-          forge verify-contract \
-            ${{ steps.newimpl.outputs.IMPL }} \
-            src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
-            --chain ${{ steps.net.outputs.CID }} \
-            --watch
-
-      - name: Update manifest
-        run: |
-          BN=$(cast block-number --rpc-url "${{ steps.net.outputs.RPC }}")
-          jq --arg i "${{ steps.newimpl.outputs.IMPL }}" --argjson bn $BN \
-             '.implementation=$i | .blockNumber=$bn | .verified=true | .updatedAt=now|toISOString' \
-             "${{ steps.net.outputs.DEP }}" > tmp.json
-          mv tmp.json "${{ steps.net.outputs.DEP }}"
-          cat "${{ steps.net.outputs.DEP }}"
-
-      - name: Commit manifest
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add deployments/*.json
-          git commit -m "chore(deployments): update implementation and metadata for ${{ github.event.inputs.network }}"
-          git push
+          SEL=0x$(echo "$RDATA" | cut -c3-10)
+          echo "Selector: $SEL"
+          cast 4byte-decode "$SEL" || true
