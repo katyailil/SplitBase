@@ -82,6 +82,43 @@ jobs:
           fi
           echo "SENDER=$SENDER" >> $GITHUB_OUTPUT
 
+      - name: Read current implementation and sanity-check UUPS
+        id: cur
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PROXY: ${{ steps.proxy.outputs.ADDR }}
+        run: |
+          SLOT=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
+          RAW=$(cast storage "$PROXY" "$SLOT" --rpc-url "$RPC_URL" | tail -n1)
+          IMPL=0x$(echo "$RAW" | tail -c 41)
+          echo "CURRENT_IMPL=$IMPL" >> $GITHUB_OUTPUT
+          echo "Current implementation: $IMPL"
+          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL"
+
+      - name: Simulate upgrade using current impl (no deploy)
+        id: sim
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PROXY: ${{ steps.proxy.outputs.ADDR }}
+          FROM: ${{ steps.who.outputs.SENDER }}
+          # set candidate to same impl to test path and read error quickly
+          CANDIDATE: ${{ steps.cur.outputs.CURRENT_IMPL }}
+        run: |
+          set +e
+          OUT=$(cast call "$PROXY" "upgradeTo(address)" "$CANDIDATE" --from "$FROM" --rpc-url "$RPC_URL" 2>&1)
+          CODE=$?
+          echo "$OUT"
+          echo "SIM_EXIT=$CODE" >> $GITHUB_OUTPUT
+          set -e
+          if [ $CODE -ne 1 ] && [ $CODE -ne 0 ]; then
+            echo "Unexpected exit code"; exit 1;
+          fi
+          # если реверт есть, мы увидим текст (например, ERC1967InvalidImplementation / OwnableUnauthorizedAccount и т.п.)
+          # здесь останавливаемся, чтобы не деплоить ничего лишнего
+          if [ $CODE -ne 0 ]; then
+            echo "Simulation reverted above. Fix the reason before deploying new impl."; exit 1;
+          fi
+
       - name: Build
         run: forge build -vv
 
@@ -102,30 +139,6 @@ jobs:
           fi
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
           echo "New implementation: $IMPL"
-
-      - name: Sanity check proxiableUUID on new impl
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-        run: |
-          cast call "${{ steps.create.outputs.IMPL }}" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL"
-
-      - name: Simulate upgrade to capture reason
-        id: sim
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PROXY: ${{ env.PROXY }}
-          IMPL: ${{ steps.create.outputs.IMPL }}
-          FROM: ${{ steps.who.outputs.SENDER }}
-        run: |
-          set +e
-          OUT=$(cast call "$PROXY" "upgradeTo(address)" "$IMPL" --from "$FROM" --rpc-url "$RPC_URL" 2>&1)
-          CODE=$?
-          echo "$OUT"
-          echo "SIM_EXIT=$CODE" >> $GITHUB_OUTPUT
-          set -e
-          if [ $CODE -ne 0 ]; then
-            echo "Simulation reverted above. Fix the reason and rerun."; exit 1;
-          fi
 
       - name: Upgrade proxy
         env:
