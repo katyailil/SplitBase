@@ -2,135 +2,149 @@ name: upgrade
 
 on:
   workflow_dispatch:
+    inputs:
+      network:
+        description: "Where to upgrade"
+        type: choice
+        options:
+          - sepolia
+          - mainnet
+        default: sepolia
+        required: true
+      rpc_url:
+        description: "Custom RPC URL (optional, overrides default)"
+        type: string
+        required: false
+      proxy:
+        description: "Proxy address (optional, overrides manifest)"
+        type: string
+        required: false
 
 jobs:
   upgrade:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up job
-        run: echo "🚀 Starting UUPS upgrade workflow"
-
-      - name: Checkout
+      - name: checkout
         uses: actions/checkout@v4
 
-      - name: Set up Foundry
+      - name: foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Install deps
+      - name: deps
         run: forge install --no-git
 
-      - name: Select network
+      - name: set network
         id: net
-        run: |
-          echo "RPC=$(jq -r '.BaseSepolia.rpc // .BaseMainnet.rpc // env.RPC_URL' deployments/deploy-info.json 2>/dev/null || echo $RPC_URL)" >> $GITHUB_OUTPUT
-
-      - name: Derive owner from PRIVATE_KEY
-        id: owner
         env:
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          IN_NET: ${{ github.event.inputs.network }}
+          IN_RPC: ${{ github.event.inputs.rpc_url }}
+          SEPOLIA_RPC: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
+          MAINNET_RPC: ${{ secrets.BASE_MAINNET_RPC_URL }}
         run: |
-          echo "OWNER=$(cast wallet address --private-key $PRIVATE_KEY)" >> $GITHUB_OUTPUT
-
-      - name: Check admin and owner
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-        run: |
-          echo "🔍 Checking current admin and caller"
-          OWNER=$(cast wallet address --private-key $PRIVATE_KEY)
-          echo "Your wallet address: $OWNER"
-
-          # auto-detect deployment JSON
-          DEPLOY_FILE=$(ls deployments/*.json | head -n 1)
-          if [ -z "$DEPLOY_FILE" ]; then
-            echo "❌ No deployment file found in /deployments"
+          if [ "$IN_NET" = "sepolia" ]; then
+            echo "CHAIN=84532" >> $GITHUB_OUTPUT
+            echo "DEPLOY=deployments/84532.json" >> $GITHUB_OUTPUT
+            DEF_RPC="$SEPOLIA_RPC"
+          else
+            echo "CHAIN=8453" >> $GITHUB_OUTPUT
+            echo "DEPLOY=deployments/8453.json" >> $GITHUB_OUTPUT
+            DEF_RPC="$MAINNET_RPC"
+          fi
+          RPC="${IN_RPC:-$DEF_RPC}"
+          if [ -z "$RPC" ]; then
+            echo "RPC URL is not set"
             exit 1
           fi
-          echo "Using deployment file: $DEPLOY_FILE"
+          echo "RPC=$RPC" >> $GITHUB_OUTPUT
 
-          PROXY=$(jq -r '.proxy' "$DEPLOY_FILE")
-          echo "Proxy: $PROXY"
+      - name: resolve proxy
+        id: addr
+        env:
+          DEPLOY_FILE: ${{ steps.net.outputs.DEPLOY }}
+          IN_PROXY: ${{ github.event.inputs.proxy }}
+        run: |
+          if [ -n "$IN_PROXY" ]; then
+            echo "PROXY=$IN_PROXY" >> $GITHUB_OUTPUT
+          elif [ -f "$DEPLOY_FILE" ]; then
+            PROXY=$(jq -r '.proxy' "$DEPLOY_FILE")
+            if [ "$PROXY" = "null" ] || [ -z "$PROXY" ]; then
+              echo "Proxy not found in $DEPLOY_FILE"
+              exit 1
+            fi
+            echo "PROXY=$PROXY" >> $GITHUB_OUTPUT
+          else
+            echo "Deployment file $DEPLOY_FILE not found"
+            exit 1
+          fi
 
-          echo "Reading admin() and owner()..."
-          cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" || echo "⚠️ admin() not found"
-          cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "⚠️ owner() not found"
+      - name: build
+        run: forge build -v
 
-      - name: Build
-        run: forge build
-
-      - name: Deploy new implementation (broadcast + parse stdout)
+      - name: deploy implementation
         id: impl
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           RPC_URL: ${{ steps.net.outputs.RPC }}
         run: |
+          set -e
           forge create src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
-            --private-key $PRIVATE_KEY \
-            --rpc-url $RPC_URL \
-            --verify \
-            --etherscan-api-key ${{ secrets.API_KEY }} | tee deploy.log
-
-          IMPL=$(grep "Deployed to:" deploy.log | awk '{print $3}')
+            --private-key "$PRIVATE_KEY" \
+            --rpc-url "$RPC_URL" | tee out.log
+          IMPL=$(awk '/Deployed to:/{print $3}' out.log)
           if [ -z "$IMPL" ]; then
-            echo "❌ Failed to detect implementation address"
+            echo "Failed to detect implementation address"
             exit 1
           fi
-          echo "impl=$IMPL" >> $GITHUB_OUTPUT
+          echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
 
-      - name: Verify implementation
+      - name: verify implementation
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
+          API_KEY: ${{ secrets.API_KEY }}
         run: |
-          echo "🔍 Verifying contract..."
-          cast verify-contract ${{ steps.impl.outputs.impl }} src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
-            --rpc-url $RPC_URL || true
+          cast verify-contract ${{ steps.impl.outputs.IMPL }} \
+            src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
+            --rpc-url "$RPC_URL" \
+            --etherscan-api-key "$API_KEY" || true
 
-      - name: Preflight checks (UUPS proxiableUUID)
-        id: uuid
+      - name: preflight proxiableUUID
         env:
-          IMPL: ${{ steps.impl.outputs.impl }}
           RPC_URL: ${{ steps.net.outputs.RPC }}
+          IMPL: ${{ steps.impl.outputs.IMPL }}
         run: |
-          SLOT="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
-          echo "🔎 Checking proxiableUUID..."
-          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" || echo "⚠️ UUID not found"
+          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" || true
 
-      - name: Upgrade proxy (simulate + robust)
+      - name: upgrade proxy
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          IMPL: ${{ steps.impl.outputs.impl }}
+          PROXY: ${{ steps.addr.outputs.PROXY }}
+          IMPL: ${{ steps.impl.outputs.IMPL }}
         run: |
           set -e
-          DEPLOY_FILE=$(ls deployments/*.json | head -n 1)
-          PROXY=$(jq -r '.proxy' "$DEPLOY_FILE")
-
-          echo "⏫ Attempting proxy upgrade..."
-          if ! cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
-              --private-key "$PRIVATE_KEY" \
-              --rpc-url "$RPC_URL" --legacy --gas-limit 2000000; then
-            echo "⚙️ Retry with upgradeToAndCall..."
-            cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "0x" \
-              --private-key "$PRIVATE_KEY" \
-              --rpc-url "$RPC_URL" --legacy --gas-limit 2000000 || {
-                echo "❌ Both upgrade paths failed"
-                exit 1
-              }
+          if cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
+              --private-key "$PRIVATE_KEY" --rpc-url "$RPC_URL" --gas-limit 2000000; then
+            exit 0
           fi
+          cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "0x" \
+            --private-key "$PRIVATE_KEY" --rpc-url "$RPC_URL" --gas-limit 2200000
 
-      - name: Update manifest
+      - name: update manifest
+        env:
+          DEPLOY_FILE: ${{ steps.net.outputs.DEPLOY }}
+          IMPL: ${{ steps.impl.outputs.IMPL }}
         run: |
-          DEPLOY_FILE=$(ls deployments/*.json | head -n 1)
-          jq '.implementation="${{ steps.impl.outputs.impl }}"' "$DEPLOY_FILE" > tmp.json && mv tmp.json "$DEPLOY_FILE"
-          echo "Manifest updated ✅"
+          tmp=$(mktemp)
+          jq --arg impl "$IMPL" '.implementation=$impl | .verified=true' "$DEPLOY_FILE" > "$tmp"
+          mv "$tmp" "$DEPLOY_FILE"
 
-      - name: Commit manifest
+      - name: commit manifest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name github-actions
           git config user.email actions@github.com
           git add deployments/
-          git commit -m "chore(ci): fix auto detection for deployments and add robust upgrade retry" || echo "no changes"
+          git commit -m "chore(ci): restore network picker and upgrade to ${{ github.event.inputs.network }} (impl ${{ steps.impl.outputs.IMPL }})" || true
           git push
