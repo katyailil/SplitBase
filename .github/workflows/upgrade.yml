@@ -1,4 +1,4 @@
-name: upgrade-diagnose
+name: upgrade-disabled
 
 on:
   workflow_dispatch:
@@ -16,107 +16,31 @@ permissions:
   contents: read
 
 jobs:
-  upgrade:
+  noop:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
-
-      - name: Install tools and deps
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
-          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2
-          forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2
-          forge install foundry-rs/forge-std@v1.9.1
-
-      - name: Setup network
+      - name: Resolve network + proxy
         id: net
         run: |
-          if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
-            echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
-            echo "DEP=deployments/8453.json" >> $GITHUB_OUTPUT
-          else
-            echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
-            echo "DEP=deployments/84532.json" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Resolve proxy
-        id: proxy
-        run: |
-          if [ -n "${{ github.event.inputs.proxy }}" ]; then ADDR="${{ github.event.inputs.proxy }}"; else ADDR=$(jq -r '.proxy' "${{ steps.net.outputs.DEP }}"); fi
-          if [ -z "$ADDR" ] || [ "$ADDR" = "null" ]; then echo "Proxy address is empty"; exit 1; fi
-          if ! echo "$ADDR" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then echo "Invalid proxy address: $ADDR"; exit 1; fi
-          echo "PROXY=$ADDR" >> $GITHUB_ENV
-          echo "Proxy: $ADDR"
-
-      - name: Check owner matches PRIVATE_KEY
-        id: who
+          if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then DEP=deployments/8453.json; RPC="${{ secrets.BASE_MAINNET_RPC_URL }}"; else DEP=deployments/84532.json; RPC="${{ secrets.BASE_SEPOLIA_RPC_URL }}"; fi
+          if [ -n "${{ github.event.inputs.proxy }}" ]; then P="${{ github.event.inputs.proxy }}"; else P=$(jq -r '.proxy' "$DEP"); fi
+          echo "rpc=$RPC" >> $GITHUB_OUTPUT
+          echo "proxy=$P"   >> $GITHUB_OUTPUT
+          echo "Using proxy: $P"
+      - name: Print current implementation
         env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PROXY: ${{ env.PROXY }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-        run: |
-          SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
-          OWNER=$(cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "")
-          echo "Sender: $SENDER"
-          echo "Owner:  $OWNER"
-          if [ -z "$OWNER" ] || [ "$OWNER" = "0x0000000000000000000000000000000000000000" ]; then echo "owner() not readable"; exit 1; fi
-          if [ "${OWNER,,}" != "${SENDER,,}" ]; then echo "PRIVATE_KEY is not the proxy owner"; exit 1; fi
-          echo "SENDER=$SENDER" >> $GITHUB_OUTPUT
-
-      - name: Read current implementation & UUID
-        id: cur
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PROXY: ${{ env.PROXY }}
+          RPC_URL: ${{ steps.net.outputs.rpc }}
+          PROXY:   ${{ steps.net.outputs.proxy }}
         run: |
           SLOT=0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc
           RAW=$(cast storage "$PROXY" "$SLOT" --rpc-url "$RPC_URL" | tail -n1)
           IMPL=0x$(echo "$RAW" | tail -c 41)
-          echo "Current implementation: $IMPL"
-          echo "CURRENT_IMPL=$IMPL" >> $GITHUB_OUTPUT
-          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" || true
-
-      - name: Build new impl (no deploy)
-        run: forge build -vv
-
-      - name: Prepare calldata for upgradeTo(address)
-        id: cal
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          TARGET: ${{ steps.cur.outputs.CURRENT_IMPL }}
+          echo "Implementation: $IMPL"
+          cast code "$IMPL" --rpc-url "$RPC_URL" >/dev/null
+      - name: Stop (upgrade temporarily disabled)
         run: |
-          DATA=$(cast calldata "upgradeTo(address)" "$TARGET")
-          echo "DATA=$DATA" >> $GITHUB_OUTPUT
-          echo "Calldata: $DATA"
-
-      - name: eth_call to capture raw revert data
-        id: rc
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PROXY: ${{ env.PROXY }}
-          FROM: ${{ steps.who.outputs.SENDER }}
-          DATA: ${{ steps.cal.outputs.DATA }}
-        run: |
-          set +e
-          RESP=$(cast rpc --rpc-url "$RPC_URL" eth_call "{\"from\":\"$FROM\",\"to\":\"$PROXY\",\"data\":\"$DATA\"}" latest 2>&1)
-          echo "$RESP"
-          # вытаскиваем поле "data":"0x...." из JSON ошибки
-          RDATA=$(echo "$RESP" | sed -n 's/.*"data":"\([^"]*\)".*/\1/p')
-          echo "RDATA=$RDATA" >> $GITHUB_OUTPUT
-          set -e
-          if [ -z "$RDATA" ]; then
-            echo "No revert data in RPC response"; exit 1;
-          fi
-          echo "Raw revert data: $RDATA"
-
-      - name: Decode revert selector
-        env:
-          RDATA: ${{ steps.rc.outputs.RDATA }}
-        run: |
-          SEL=0x$(echo "$RDATA" | cut -c3-10)
-          echo "Selector: $SEL"
-          cast 4byte-decode "$SEL" || true
+          echo "Upgrade is temporarily disabled due to revert on current implementation. Proceeding with tests/README."
