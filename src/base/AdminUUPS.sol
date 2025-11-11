@@ -20,10 +20,19 @@ abstract contract AdminUUPS is Initializable, UUPSUpgradeable {
         return _admin;
     }
 
+    // Однократная установка администратора после апгрейда через прокси
+    function bootstrapAdmin(address admin_) external onlyProxy {
+        require(_admin == address(0), "ADMIN_ALREADY_SET");
+        require(admin_ != address(0), "ZERO_ADDR");
+        _admin = admin_;
+    }
+
     function transferAdmin(address newAdmin) external onlyAdmin {
         require(newAdmin != address(0), "ZERO_ADDR");
         _admin = newAdmin;
     }
 
     function _authorizeUpgrade(address) internal override onlyAdmin {}
+
+    uint256[49] private __gap;
 }
