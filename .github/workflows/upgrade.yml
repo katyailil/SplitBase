@@ -23,7 +23,7 @@ jobs:
       - name: Select network
         id: net
         run: |
-          echo "RPC=$(jq -r '.BaseSepolia.rpc // .BaseMainnet.rpc // env.RPC_URL' deployments/deploy-info.json)" >> $GITHUB_OUTPUT
+          echo "RPC=$(jq -r '.BaseSepolia.rpc // .BaseMainnet.rpc // env.RPC_URL' deployments/deploy-info.json 2>/dev/null || echo $RPC_URL)" >> $GITHUB_OUTPUT
 
       - name: Derive owner from PRIVATE_KEY
         id: owner
@@ -40,11 +40,21 @@ jobs:
           echo "🔍 Checking current admin and caller"
           OWNER=$(cast wallet address --private-key $PRIVATE_KEY)
           echo "Your wallet address: $OWNER"
-          PROXY=$(jq -r '.BaseSepolia.proxy // .BaseMainnet.proxy' deployments/deploy-info.json)
+
+          # auto-detect deployment JSON
+          DEPLOY_FILE=$(ls deployments/*.json | head -n 1)
+          if [ -z "$DEPLOY_FILE" ]; then
+            echo "❌ No deployment file found in /deployments"
+            exit 1
+          fi
+          echo "Using deployment file: $DEPLOY_FILE"
+
+          PROXY=$(jq -r '.proxy' "$DEPLOY_FILE")
           echo "Proxy: $PROXY"
+
           echo "Reading admin() and owner()..."
-          cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" || echo "admin() not found"
-          cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "owner() not found"
+          cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" || echo "⚠️ admin() not found"
+          cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "⚠️ owner() not found"
 
       - name: Build
         run: forge build
@@ -60,14 +70,19 @@ jobs:
             --rpc-url $RPC_URL \
             --verify \
             --etherscan-api-key ${{ secrets.API_KEY }} | tee deploy.log
+
           IMPL=$(grep "Deployed to:" deploy.log | awk '{print $3}')
+          if [ -z "$IMPL" ]; then
+            echo "❌ Failed to detect implementation address"
+            exit 1
+          fi
           echo "impl=$IMPL" >> $GITHUB_OUTPUT
 
       - name: Verify implementation
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
         run: |
-          echo "Verifying on chain..."
+          echo "🔍 Verifying contract..."
           cast verify-contract ${{ steps.impl.outputs.impl }} src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
             --rpc-url $RPC_URL || true
 
@@ -78,8 +93,8 @@ jobs:
           RPC_URL: ${{ steps.net.outputs.RPC }}
         run: |
           SLOT="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
-          echo "🔍 UUPS UUID: $SLOT"
-          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL"
+          echo "🔎 Checking proxiableUUID..."
+          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" || echo "⚠️ UUID not found"
 
       - name: Upgrade proxy (simulate + robust)
         env:
@@ -88,3 +103,34 @@ jobs:
           IMPL: ${{ steps.impl.outputs.impl }}
         run: |
           set -e
+          DEPLOY_FILE=$(ls deployments/*.json | head -n 1)
+          PROXY=$(jq -r '.proxy' "$DEPLOY_FILE")
+
+          echo "⏫ Attempting proxy upgrade..."
+          if ! cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
+              --private-key "$PRIVATE_KEY" \
+              --rpc-url "$RPC_URL" --legacy --gas-limit 2000000; then
+            echo "⚙️ Retry with upgradeToAndCall..."
+            cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "0x" \
+              --private-key "$PRIVATE_KEY" \
+              --rpc-url "$RPC_URL" --legacy --gas-limit 2000000 || {
+                echo "❌ Both upgrade paths failed"
+                exit 1
+              }
+          fi
+
+      - name: Update manifest
+        run: |
+          DEPLOY_FILE=$(ls deployments/*.json | head -n 1)
+          jq '.implementation="${{ steps.impl.outputs.impl }}"' "$DEPLOY_FILE" > tmp.json && mv tmp.json "$DEPLOY_FILE"
+          echo "Manifest updated ✅"
+
+      - name: Commit manifest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add deployments/
+          git commit -m "chore(ci): fix auto detection for deployments and add robust upgrade retry" || echo "no changes"
+          git push
