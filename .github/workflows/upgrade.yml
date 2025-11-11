@@ -102,7 +102,7 @@ jobs:
             --chain ${{ steps.net.outputs.CID }} \
             --watch
 
-      - name: Upgrade proxy (upgradeToAndCall + init admin)
+      - name: Upgrade proxy (upgradeToAndCall + bootstrap admin)
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
@@ -110,7 +110,7 @@ jobs:
           IMPL: ${{ steps.create.outputs.IMPL }}
         run: |
           SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
-          INIT=$(cast calldata "initialize(address)" "$SENDER")
+          INIT=$(cast calldata "bootstrapAdmin(address)" "$SENDER")
           cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" \
             --rpc-url "$RPC_URL" \
             --private-key "$PRIVATE_KEY" \
