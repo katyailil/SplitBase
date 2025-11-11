@@ -57,9 +57,9 @@ jobs:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
         run: |
           SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
-          OWNER=$(cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" || true)
+          OWNER=$(cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" 2>/dev/null || true)
           if [ -z "$OWNER" ] || [ "$OWNER" = "0x0000000000000000000000000000000000000000" ]; then
-            OWNER=$(cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "")
+            OWNER=$(cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" 2>/dev/null || echo "")
           fi
           echo "Sender: $SENDER"
           echo "Owner:  $OWNER"
@@ -102,19 +102,31 @@ jobs:
             --chain ${{ steps.net.outputs.CID }} \
             --watch
 
-      - name: Upgrade proxy (upgradeToAndCall + bootstrap admin)
+      - name: Upgrade proxy (auto-detect admin)
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           PROXY: ${{ steps.proxy.outputs.PROXY }}
           IMPL: ${{ steps.create.outputs.IMPL }}
         run: |
+          set -e
           SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
-          INIT=$(cast calldata "bootstrapAdmin(address)" "$SENDER")
-          cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" \
-            --rpc-url "$RPC_URL" \
-            --private-key "$PRIVATE_KEY" \
-            --legacy -vvvv
+
+          CURRENT_ADMIN=$(cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" 2>/dev/null || echo "")
+          if echo "$CURRENT_ADMIN" | grep -Eq '^0x[0-9a-fA-F]{40}$' && [ "${CURRENT_ADMIN,,}" != "0x0000000000000000000000000000000000000000" ]; then
+            echo "Admin already set ($CURRENT_ADMIN); using upgradeTo(address)"
+            cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
+              --rpc-url "$RPC_URL" \
+              --private-key "$PRIVATE_KEY" \
+              --legacy -vvvv
+          else
+            echo "Admin not set; using upgradeToAndCall(address,bytes) with bootstrapAdmin(admin)"
+            INIT=$(cast calldata "bootstrapAdmin(address)" "$SENDER")
+            cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" \
+              --rpc-url "$RPC_URL" \
+              --private-key "$PRIVATE_KEY" \
+              --legacy -vvvv
+          fi
 
       - name: Update manifest
         env:
