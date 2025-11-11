@@ -25,8 +25,10 @@ jobs:
         with:
           version: nightly
 
-      - name: Install dependencies
+      - name: Install tools
         run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
           forge install OpenZeppelin/openzeppelin-contracts@v5.0.2
           forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2
           forge install foundry-rs/forge-std@v1.9.1
@@ -44,21 +46,26 @@ jobs:
             echo "DEP=deployments/84532.json" >> $GITHUB_OUTPUT
           fi
 
-      - name: Read proxy from manifest or input
+      - name: Resolve proxy
         id: proxy
         run: |
           if [ -n "${{ github.event.inputs.proxy }}" ]; then
-            echo "ADDR=${{ github.event.inputs.proxy }}" >> $GITHUB_OUTPUT
+            ADDR="${{ github.event.inputs.proxy }}"
           else
             ADDR=$(jq -r '.proxy' "${{ steps.net.outputs.DEP }}")
-            echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
           fi
+          if [ -z "$ADDR" ] || [ "$ADDR" = "null" ]; then
+            echo "Proxy address is empty"; exit 1;
+          fi
+          echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
+          echo "PROXY=$ADDR" >> $GITHUB_ENV
+          echo "Using proxy: $ADDR"
 
       - name: Upgrade
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          PROXY: ${{ steps.proxy.outputs.ADDR }}
+          PROXY: ${{ env.PROXY }}
         run: |
           forge script script/UpgradeUUPS.s.sol:UpgradeUUPS \
             --rpc-url "$RPC_URL" \
@@ -71,7 +78,14 @@ jobs:
         id: parse
         run: |
           IMPL=$(grep -E "^Implementation " out.txt | awk '{print $2}')
+          if [ -z "$IMPL" ]; then
+            IMPL=$(grep -E "^New implementation deployed:" out.txt | awk '{print $4}')
+          fi
+          if [ -z "$IMPL" ]; then
+            echo "Implementation not found in logs"; cat out.txt; exit 1;
+          fi
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
+          echo "New implementation: $IMPL"
 
       - name: Verify implementation
         env:
