@@ -25,77 +25,68 @@ jobs:
         with:
           version: nightly
 
-      - name: setup
-        id: setup
+      - name: Setup network
+        id: net
         run: |
           if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
             echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
             echo "CID=8453" >> $GITHUB_OUTPUT
             echo "DEP=deployments/8453.json" >> $GITHUB_OUTPUT
-            echo "ENV_NETWORK=MAINNET" >> $GITHUB_OUTPUT
           else
             echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
             echo "CID=84532" >> $GITHUB_OUTPUT
             echo "DEP=deployments/84532.json" >> $GITHUB_OUTPUT
-            echo "ENV_NETWORK=SEPOLIA" >> $GITHUB_OUTPUT
           fi
 
-      - name: read-proxy
+      - name: Read proxy from manifest or input
         id: proxy
         run: |
           if [ -n "${{ github.event.inputs.proxy }}" ]; then
             echo "ADDR=${{ github.event.inputs.proxy }}" >> $GITHUB_OUTPUT
           else
-            ADDR=$(jq -r '.proxy' "${{ steps.setup.outputs.DEP }}")
+            ADDR=$(jq -r '.proxy' "${{ steps.net.outputs.DEP }}")
             echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
           fi
 
-      - name: upgrade
+      - name: Upgrade
         env:
-          RPC_URL: ${{ steps.setup.outputs.RPC }}
+          RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
-          ENV_NETWORK: ${{ steps.setup.outputs.ENV_NETWORK }}
-          PROXY_ADDRESS_MAINNET: ${{ steps.proxy.outputs.ADDR }}
-          PROXY_ADDRESS_SEPOLIA: ${{ steps.proxy.outputs.ADDR }}
-          RECIPIENTS: ${{ secrets.RECIPIENTS }}
-          SHARES: ${{ secrets.SHARES }}
+          PROXY: ${{ steps.proxy.outputs.ADDR }}
         run: |
           forge script script/UpgradeUUPS.s.sol:UpgradeUUPS \
             --rpc-url "$RPC_URL" \
             --broadcast \
             --private-key "$PRIVATE_KEY" \
+            --sig "run()" \
             -vvvv > out.txt
 
-      - name: parse-impl
+      - name: Parse new implementation
         id: parse
         run: |
-          IMPL=$(grep -E "^New implementation deployed:" out.txt | awk '{print $4}')
-          if [ -z "$IMPL" ]; then
-            IMPL=$(grep -E "^Implementation" out.txt | awk '{print $2}')
-          fi
+          IMPL=$(grep -E "^Implementation " out.txt | awk '{print $2}')
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
 
-      - name: verify
+      - name: Verify implementation
         env:
           ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
         run: |
           forge verify-contract \
             ${{ steps.parse.outputs.IMPL }} \
             src/implementations/SplitBaseV1.sol:SplitBaseV1 \
-            --chain ${{ steps.setup.outputs.CID }} \
+            --chain ${{ steps.net.outputs.CID }} \
             --watch
 
-      - name: update-manifest
+      - name: Update manifest
         run: |
-          BN=$(cast block-number --rpc-url "${{ steps.setup.outputs.RPC }}")
+          BN=$(cast block-number --rpc-url "${{ steps.net.outputs.RPC }}")
           jq --arg i "${{ steps.parse.outputs.IMPL }}" --argjson bn $BN \
              '.implementation=$i | .blockNumber=$bn | .verified=true | .updatedAt=now|toISOString' \
-             "${{ steps.setup.outputs.DEP }}" > tmp.json
-          mv tmp.json "${{ steps.setup.outputs.DEP }}"
-          cat "${{ steps.setup.outputs.DEP }}"
+             "${{ steps.net.outputs.DEP }}" > tmp.json
+          mv tmp.json "${{ steps.net.outputs.DEP }}"
+          cat "${{ steps.net.outputs.DEP }}"
 
-      - name: commit
+      - name: Commit manifest
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
