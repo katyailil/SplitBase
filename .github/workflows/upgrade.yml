@@ -51,8 +51,7 @@ jobs:
           fi
           RPC="${IN_RPC:-$DEF_RPC}"
           if [ -z "$RPC" ]; then
-            echo "RPC URL is not set"
-            exit 1
+            echo "RPC URL is not set"; exit 1;
           fi
           echo "RPC=$RPC" >> $GITHUB_OUTPUT
 
@@ -67,13 +66,11 @@ jobs:
           elif [ -f "$DEPLOY_FILE" ]; then
             PROXY=$(jq -r '.proxy' "$DEPLOY_FILE")
             if [ "$PROXY" = "null" ] || [ -z "$PROXY" ]; then
-              echo "Proxy not found in $DEPLOY_FILE"
-              exit 1
+              echo "Proxy not found in $DEPLOY_FILE"; exit 1;
             fi
             echo "PROXY=$PROXY" >> $GITHUB_OUTPUT
           else
-            echo "Deployment file $DEPLOY_FILE not found"
-            exit 1
+            echo "Deployment file $DEPLOY_FILE not found"; exit 1;
           fi
 
       - name: build
@@ -102,8 +99,7 @@ jobs:
 
           if [ -z "$IMPL" ] || [ "$IMPL" = "null" ]; then
             echo "create.json:" && cat out/ci/create.json
-            echo "Failed to detect implementation address"
-            exit 1
+            echo "Failed to detect implementation address"; exit 1;
           fi
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
           echo "Implementation: $IMPL"
@@ -113,6 +109,7 @@ jobs:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           API_KEY: ${{ secrets.API_KEY }}
         run: |
+          # не валим джоб, если верификация ещё не видит байткод
           cast verify-contract ${{ steps.impl.outputs.IMPL }} \
             src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
             --rpc-url "$RPC_URL" \
@@ -125,7 +122,7 @@ jobs:
         run: |
           cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" || true
 
-      - name: upgrade proxy
+      - name: upgrade proxy (nonce + gas bump, retry on underpriced)
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
@@ -133,12 +130,86 @@ jobs:
           IMPL: ${{ steps.impl.outputs.IMPL }}
         run: |
           set -e
-          if cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
-              --private-key "$PRIVATE_KEY" --rpc-url "$RPC_URL" --gas-limit 2000000; then
-            exit 0
+
+          SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
+          NONCE=$(cast nonce "$SENDER" --rpc-url "$RPC_URL")
+
+          BASE=$(cast gas-price --rpc-url "$RPC_URL")
+          # расчёт fee с бампом (≈20%)
+          MAX_FEE=$(python3 - <<PY
+b=int("$BASE"); print(int(b*1.2))
+PY
+)
+          PRIO=$(python3 - <<PY
+b=int("$BASE")
+p=max(int(b*0.1), 1_000_000_000)   
+print(p)
+PY
+)
+
+          echo "sender=$SENDER nonce=$NONCE base=$BASE maxFee=$MAX_FEE prio=$PRIO"
+
+          send() {
+            cast send "$PROXY" "$1" $2 \
+              --private-key "$PRIVATE_KEY" \
+              --rpc-url "$RPC_URL" \
+              --nonce "$NONCE" \
+              --priority-gas-price "$PRIO" \
+              --max-fee-per-gas "$MAX_FEE" \
+              --gas-limit 2200000
+          }
+
+          set +e
+         
+          OUT=$(send "upgradeTo(address)" "$IMPL" 2>&1)
+          RC=$?
+          echo "$OUT"
+          if [ $RC -ne 0 ]; then
+            echo "first attempt failed, checking for 'underpriced'…"
+            if echo "$OUT" | grep -qi "replacement transaction underpriced"; then
+              echo "bumping fees and retrying same nonce…"
+              MAX_FEE=$(python3 - <<PY
+b=int("$MAX_FEE"); print(int(b*1.25))
+PY
+)
+              PRIO=$(python3 - <<PY
+p=int("$PRIO"); print(int(p*1.25))
+PY
+)
+              OUT=$(send "upgradeTo(address)" "$IMPL" 2>&1)
+              RC=$?
+              echo "$OUT"
+            fi
           fi
-          cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "0x" \
-            --private-key "$PRIVATE_KEY" --rpc-url "$RPC_URL" --gas-limit 2200000
+
+       
+          if [ $RC -ne 0 ]; then
+            echo "fallback: upgradeToAndCall(address,bytes)"
+            OUT=$(send "upgradeToAndCall(address,bytes)" "$IMPL" "0x" 2>&1)
+            RC=$?
+            echo "$OUT"
+
+            if [ $RC -ne 0 ] && echo "$OUT" | grep -qi "replacement transaction underpriced"; then
+              echo "underpriced again → ещё один bump и retry"
+              MAX_FEE=$(python3 - <<PY
+b=int("$MAX_FEE"); print(int(b*1.25))
+PY
+)
+              PRIO=$(python3 - <<PY
+p=int("$PRIO"); print(int(p*1.25))
+PY
+)
+              OUT=$(send "upgradeToAndCall(address,bytes)" "$IMPL" "0x" 2>&1)
+              RC=$?
+              echo "$OUT"
+            fi
+          fi
+          set -e
+
+          if [ $RC -ne 0 ]; then
+            echo "upgrade failed"; exit $RC;
+          fi
+          echo "upgrade tx submitted"
 
       - name: update manifest
         env:
@@ -156,5 +227,5 @@ jobs:
           git config user.name github-actions
           git config user.email actions@github.com
           git add deployments/
-          git commit -m "chore(ci): broadcast deploy and parse impl from JSON (impl ${{ steps.impl.outputs.IMPL }})" || true
+          git commit -m "ci(upgrade): stable gas-bumped resend on underpriced; keep nonce fixed; impl ${{ steps.impl.outputs.IMPL }}" || true
           git push
