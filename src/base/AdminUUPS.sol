@@ -14,7 +14,6 @@ abstract contract AdminUUPS is Initializable, UUPSUpgradeable {
 
     function __AdminUUPS_init(address admin_) internal onlyInitializing {
         _admin = admin_;
-        UUPSUpgradeable.__UUPSUpgradeable_init();
     }
 
     function admin() public view returns (address) {
