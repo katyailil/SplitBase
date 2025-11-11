@@ -74,13 +74,17 @@ jobs:
               --rpc-url "$RPC_URL" \
               --broadcast \
               --private-key "$PRIVATE_KEY" \
-              --sig "run(address)" "$OWNER" -vvvv > out.txt
-            IMPL=$(grep -E "^[Ii]mplementation" out.txt | awk '{print $NF}' | tr -d '\r\n')
-            PROXY=$(grep -E "^[Pp]roxy" out.txt | awk '{print $NF}' | tr -d '\r\n')
+              --sig "run(address)" "$OWNER" -vvvv
+
+            FILE=$(find broadcast -type f -name 'run-*.json' | sort | tail -n 1)
+            IMPL=$(jq -r '.transactions[] | select(.contractName=="SplitBaseUpgradeable") | .contractAddress' "$FILE" | tail -n 1)
+            PROXY=$(jq -r '.transactions[] | select(.contractName=="ERC1967Proxy") | .contractAddress' "$FILE" | tail -n 1)
+
+            echo "Implementation: $IMPL"
+            echo "Proxy: $PROXY"
+
             echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
             echo "PROXY=$PROXY" >> $GITHUB_OUTPUT
-            echo "Implementation address: $IMPL"
-            echo "Proxy address: $PROXY"
           fi
 
       - name: Validate addresses
