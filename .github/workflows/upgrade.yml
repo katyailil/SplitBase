@@ -1,16 +1,19 @@
-name: Upgrade UUPS Proxy
+name: upgrade
 
 on:
   workflow_dispatch:
     inputs:
       network:
-        description: "Where to upgrade"
+        description: network
         type: choice
         options: [sepolia, mainnet]
         default: sepolia
       proxy:
-        description: "Proxy address (optional, overrides VAR)"
+        description: proxy override (optional)
         required: false
+
+permissions:
+  contents: write
 
 jobs:
   upgrade:
@@ -18,45 +21,84 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
 
-      - name: Install dependencies
+      - name: setup
+        id: setup
         run: |
-          forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2
-          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2
-          forge install foundry-rs/forge-std
-
-      - name: Set env (RPC, PROXY_ADDRESS)
-        shell: bash
-        run: |
-          if [ "${{ github.event.inputs.network }}" = "sepolia" ]; then
-            echo "RPC_URL=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_ENV
+          if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
+            echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
+            echo "CID=8453" >> $GITHUB_OUTPUT
+            echo "DEP=deployments/8453.json" >> $GITHUB_OUTPUT
+            echo "ENV_NETWORK=MAINNET" >> $GITHUB_OUTPUT
           else
-            echo "RPC_URL=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_ENV
+            echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
+            echo "CID=84532" >> $GITHUB_OUTPUT
+            echo "DEP=deployments/84532.json" >> $GITHUB_OUTPUT
+            echo "ENV_NETWORK=SEPOLIA" >> $GITHUB_OUTPUT
           fi
+
+      - name: read-proxy
+        id: proxy
+        run: |
           if [ -n "${{ github.event.inputs.proxy }}" ]; then
-            echo "PROXY_ADDRESS=${{ github.event.inputs.proxy }}" >> $GITHUB_ENV
+            echo "ADDR=${{ github.event.inputs.proxy }}" >> $GITHUB_OUTPUT
           else
-            echo "PROXY_ADDRESS=${{ vars.PROXY_ADDRESS }}" >> $GITHUB_ENV
+            ADDR=$(jq -r '.proxy' "${{ steps.setup.outputs.DEP }}")
+            echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
           fi
 
-      - name: Build
-        run: forge build -vv
-
-      - name: Upgrade
+      - name: upgrade
         env:
+          RPC_URL: ${{ steps.setup.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+          ENV_NETWORK: ${{ steps.setup.outputs.ENV_NETWORK }}
+          PROXY_ADDRESS_MAINNET: ${{ steps.proxy.outputs.ADDR }}
+          PROXY_ADDRESS_SEPOLIA: ${{ steps.proxy.outputs.ADDR }}
+          RECIPIENTS: ${{ secrets.RECIPIENTS }}
+          SHARES: ${{ secrets.SHARES }}
         run: |
-          source /dev/stdin <<< "PROXY_ADDRESS=$PROXY_ADDRESS"
           forge script script/UpgradeUUPS.s.sol:UpgradeUUPS \
             --rpc-url "$RPC_URL" \
+            --broadcast \
             --private-key "$PRIVATE_KEY" \
-            --broadcast
+            -vvvv > out.txt
 
-      - name: Summary
+      - name: parse-impl
+        id: parse
         run: |
-          echo "### Upgrade done on ${{ github.event.inputs.network }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Proxy: \`${{ env.PROXY_ADDRESS }}\`" >> $GITHUB_STEP_SUMMARY
+          IMPL=$(grep -E "^New implementation deployed:" out.txt | awk '{print $4}')
+          if [ -z "$IMPL" ]; then
+            IMPL=$(grep -E "^Implementation" out.txt | awk '{print $2}')
+          fi
+          echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
+
+      - name: verify
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+        run: |
+          forge verify-contract \
+            ${{ steps.parse.outputs.IMPL }} \
+            src/implementations/SplitBaseV1.sol:SplitBaseV1 \
+            --chain ${{ steps.setup.outputs.CID }} \
+            --watch
+
+      - name: update-manifest
+        run: |
+          BN=$(cast block-number --rpc-url "${{ steps.setup.outputs.RPC }}")
+          jq --arg i "${{ steps.parse.outputs.IMPL }}" --argjson bn $BN \
+             '.implementation=$i | .blockNumber=$bn | .verified=true | .updatedAt=now|toISOString' \
+             "${{ steps.setup.outputs.DEP }}" > tmp.json
+          mv tmp.json "${{ steps.setup.outputs.DEP }}"
+          cat "${{ steps.setup.outputs.DEP }}"
+
+      - name: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deployments/*.json
+          git commit -m "chore(deployments): update implementation and metadata for ${{ github.event.inputs.network }}"
+          git push
