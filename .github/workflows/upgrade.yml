@@ -48,20 +48,12 @@ jobs:
       - name: Resolve proxy
         id: proxy
         run: |
-          if [ -n "${{ github.event.inputs.proxy }}" ]; then
-            ADDR="${{ github.event.inputs.proxy }}"
-          else
-            ADDR=$(jq -r '.proxy' "${{ steps.net.outputs.DEP }}")
-          fi
-          if [ -z "$ADDR" ] || [ "$ADDR" = "null" ]; then
-            echo "Proxy address is empty"; exit 1;
-          fi
-          if ! echo "$ADDR" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then
-            echo "Invalid proxy address: $ADDR"; exit 1;
-          fi
+          if [ -n "${{ github.event.inputs.proxy }}" ]; then ADDR="${{ github.event.inputs.proxy }}"; else ADDR=$(jq -r '.proxy' "${{ steps.net.outputs.DEP }}"); fi
+          if [ -z "$ADDR" ] || [ "$ADDR" = "null" ]; then echo "Proxy address is empty"; exit 1; fi
+          if ! echo "$ADDR" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then echo "Invalid proxy address: $ADDR"; exit 1; fi
           echo "PROXY=$ADDR" >> $GITHUB_ENV
           echo "ADDR=$ADDR" >> $GITHUB_OUTPUT
-          echo "Candidate proxy: $ADDR"
+          echo "Proxy: $ADDR"
 
       - name: Check owner matches PRIVATE_KEY
         id: who
@@ -74,15 +66,11 @@ jobs:
           OWNER=$(cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "")
           echo "Sender: $SENDER"
           echo "Owner:  $OWNER"
-          if [ -z "$OWNER" ] || [ "$OWNER" = "0x0000000000000000000000000000000000000000" ]; then
-            echo "owner() not readable via proxy"; exit 1;
-          fi
-          if [ "${OWNER,,}" != "${SENDER,,}" ]; then
-            echo "PRIVATE_KEY is not the proxy owner"; exit 1;
-          fi
+          if [ -z "$OWNER" ] || [ "$OWNER" = "0x0000000000000000000000000000000000000000" ]; then echo "owner() not readable"; exit 1; fi
+          if [ "${OWNER,,}" != "${SENDER,,}" ]; then echo "PRIVATE_KEY is not the proxy owner"; exit 1; fi
           echo "SENDER=$SENDER" >> $GITHUB_OUTPUT
 
-      - name: Read current implementation and sanity-check UUPS
+      - name: Read current implementation
         id: cur
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
@@ -95,35 +83,50 @@ jobs:
           echo "Current implementation: $IMPL"
           cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL"
 
-      - name: Simulate upgrade using current impl (no deploy)
-        id: sim
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PROXY: ${{ steps.proxy.outputs.ADDR }}
-          FROM: ${{ steps.who.outputs.SENDER }}
-          # set candidate to same impl to test path and read error quickly
-          CANDIDATE: ${{ steps.cur.outputs.CURRENT_IMPL }}
-        run: |
-          set +e
-          OUT=$(cast call "$PROXY" "upgradeTo(address)" "$CANDIDATE" --from "$FROM" --rpc-url "$RPC_URL" 2>&1)
-          CODE=$?
-          echo "$OUT"
-          echo "SIM_EXIT=$CODE" >> $GITHUB_OUTPUT
-          set -e
-          if [ $CODE -ne 1 ] && [ $CODE -ne 0 ]; then
-            echo "Unexpected exit code"; exit 1;
-          fi
-          # если реверт есть, мы увидим текст (например, ERC1967InvalidImplementation / OwnableUnauthorizedAccount и т.п.)
-          # здесь останавливаемся, чтобы не деплоить ничего лишнего
-          if [ $CODE -ne 0 ]; then
-            echo "Simulation reverted above. Fix the reason before deploying new impl."; exit 1;
-          fi
-
       - name: Build
         run: forge build -vv
 
-      - name: Deploy new implementation
-        id: create
+      - name: Deploy DummyUUPS
+        id: dummy
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          forge create src/DummyUUPS.sol:DummyUUPS \
+            --rpc-url "$RPC_URL" \
+            --private-key "$PRIVATE_KEY" \
+            --broadcast -vvvv > dd.txt
+          DUMMY=$(grep -E "Deployed to:" dd.txt | awk '{print $3}')
+          echo "DUMMY=$DUMMY" >> $GITHUB_OUTPUT
+          echo "Dummy: $DUMMY"
+
+      - name: Simulate upgrade to Dummy
+        id: sim1
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PROXY: ${{ env.PROXY }}
+          FROM: ${{ steps.who.outputs.SENDER }}
+          DUMMY: ${{ steps.dummy.outputs.DUMMY }}
+        run: |
+          set +e
+          OUT=$(cast call "$PROXY" "upgradeTo(address)" "$DUMMY" --from "$FROM" --rpc-url "$RPC_URL" 2>&1)
+          CODE=$?
+          echo "$OUT"
+          set -e
+          if [ $CODE -ne 0 ]; then echo "Simulation to Dummy reverted above"; exit 1; fi
+
+      - name: Upgrade to Dummy
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          PROXY: ${{ env.PROXY }}
+          DUMMY: ${{ steps.dummy.outputs.DUMMY }}
+        run: |
+          cast send "$PROXY" "upgradeTo(address)" "$DUMMY" \
+            --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
+
+      - name: Deploy real SplitBaseUpgradeable
+        id: newimpl
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
@@ -131,34 +134,27 @@ jobs:
           forge create src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
             --rpc-url "$RPC_URL" \
             --private-key "$PRIVATE_KEY" \
-            --broadcast \
-            -vvvv > create.txt
-          IMPL=$(grep -E "Deployed to:" create.txt | awk '{print $3}')
-          if ! echo "$IMPL" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then
-            echo "Failed to parse implementation address"; cat create.txt; exit 1;
-          fi
+            --broadcast -vvvv > cr.txt
+          IMPL=$(grep -E "Deployed to:" cr.txt | awk '{print $3}')
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
-          echo "New implementation: $IMPL"
+          echo "New impl: $IMPL"
 
-      - name: Upgrade proxy
+      - name: Upgrade to real impl
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           PROXY: ${{ env.PROXY }}
-          IMPL: ${{ steps.create.outputs.IMPL }}
+          IMPL: ${{ steps.newimpl.outputs.IMPL }}
         run: |
           cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
-            --rpc-url "$RPC_URL" \
-            --private-key "$PRIVATE_KEY" \
-            --legacy \
-            -vvvv
+            --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
 
       - name: Verify implementation
         env:
           ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
         run: |
           forge verify-contract \
-            ${{ steps.create.outputs.IMPL }} \
+            ${{ steps.newimpl.outputs.IMPL }} \
             src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
             --chain ${{ steps.net.outputs.CID }} \
             --watch
@@ -166,7 +162,7 @@ jobs:
       - name: Update manifest
         run: |
           BN=$(cast block-number --rpc-url "${{ steps.net.outputs.RPC }}")
-          jq --arg i "${{ steps.create.outputs.IMPL }}" --argjson bn $BN \
+          jq --arg i "${{ steps.newimpl.outputs.IMPL }}" --argjson bn $BN \
              '.implementation=$i | .blockNumber=$bn | .verified=true | .updatedAt=now|toISOString' \
              "${{ steps.net.outputs.DEP }}" > tmp.json
           mv tmp.json "${{ steps.net.outputs.DEP }}"
