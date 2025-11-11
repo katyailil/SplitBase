@@ -18,7 +18,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
 
       - name: Install deps
-        run: forge install --no-commit
+        run: forge install --no-git
 
       - name: Select network
         id: net
@@ -88,29 +88,3 @@ jobs:
           IMPL: ${{ steps.impl.outputs.impl }}
         run: |
           set -e
-          PROXY=$(jq -r '.BaseSepolia.proxy // .BaseMainnet.proxy' deployments/deploy-info.json)
-          echo "⏫ Upgrading proxy $PROXY to new implementation $IMPL"
-          echo "Simulate upgrade..."
-          if ! cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
-              --private-key "$PRIVATE_KEY" \
-              --rpc-url "$RPC_URL" --legacy --gas-limit 2000000; then
-            echo "Simulation reverted — retrying robust mode..."
-            cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "0x" \
-              --private-key "$PRIVATE_KEY" \
-              --rpc-url "$RPC_URL" --legacy --gas-limit 2000000
-          fi
-
-      - name: Update manifest
-        run: |
-          jq '.BaseSepolia.implementation="${{ steps.impl.outputs.impl }}"' deployments/deploy-info.json > tmp.json && mv tmp.json deployments/deploy-info.json
-          echo "Manifest updated."
-
-      - name: Commit manifest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name github-actions
-          git config user.email actions@github.com
-          git add deployments/deploy-info.json
-          git commit -m "chore: upgrade implementation to ${{ steps.impl.outputs.impl }}" || echo "no changes"
-          git push
