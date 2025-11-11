@@ -1,14 +1,11 @@
 {
   "network": "base",
   "chainId": 8453,
-  "proxy": "0xd59d94632381bb206667d1cc594db412193e27b1",
+  "contract": "SplitBaseUpgradeable",
+  "uups": true,
+  "proxy": "0x349dc2d7bf09e753428abf5677dcb5f3b97961dc",
   "implementation": "0x275099a4126a2ddced4d352b2dc2edddc37107a2",
-  "txHashProxy": "",
-  "txHashImpl": "",
   "blockNumber": 0,
-  "contract": "SplitBase",
-  "pattern": "UUPS",
   "verified": false,
-  "updatedAt": "2025-11-11T11:33:41Z",
-  "proxyV2": "0x349dc2d7bf09e753428abf5677dcb5f3b97961dc"
+  "updatedAt": "2025-11-11T11:33:41Z"
 }
