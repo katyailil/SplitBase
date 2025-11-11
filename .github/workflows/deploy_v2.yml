@@ -1,0 +1,107 @@
+name: deploy_v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: network
+        type: choice
+        options: [sepolia, mainnet]
+        default: sepolia
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2
+          forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2
+          forge install foundry-rs/forge-std@v1.9.1
+
+      - name: Select network
+        id: net
+        run: |
+          if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
+            echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
+            echo "CID=8453" >> $GITHUB_OUTPUT
+            echo "DEP=deployments/8453.json" >> $GITHUB_OUTPUT
+          else
+            echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
+            echo "CID=84532" >> $GITHUB_OUTPUT
+            echo "DEP=deployments/84532.json" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Derive owner from PRIVATE_KEY
+        id: owner
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          ADDR=$(cast wallet address --private-key "$PRIVATE_KEY")
+          echo "OWNER=$ADDR" >> $GITHUB_OUTPUT
+          echo "Owner: $ADDR"
+
+      - name: Build
+        run: forge build -vv
+
+      - name: Deploy V2 proxy
+        id: deploy
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          OWNER: ${{ steps.owner.outputs.OWNER }}
+        run: |
+          forge script script/DeployProxyV2.s.sol:DeployProxyV2 \
+            --rpc-url "$RPC_URL" \
+            --broadcast \
+            --private-key "$PRIVATE_KEY" \
+            --sig "run(address)" "$OWNER" -vvvv > out.txt
+          IMPL=$(grep -E "^Implementation " out.txt | awk '{print $2}')
+          PROXY=$(grep -E "^Proxy " out.txt | awk '{print $2}')
+          echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
+          echo "PROXY=$PROXY" >> $GITHUB_OUTPUT
+          echo "Deployed implementation: $IMPL"
+          echo "Deployed proxy: $PROXY"
+
+      - name: Verify implementation
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+        run: |
+          forge verify-contract \
+            ${{ steps.deploy.outputs.IMPL }} \
+            src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
+            --chain ${{ steps.net.outputs.CID }} \
+            --watch
+
+      - name: Update deployments manifest
+        env:
+          DEP: ${{ steps.net.outputs.DEP }}
+          PROXY: ${{ steps.deploy.outputs.PROXY }}
+          IMPL: ${{ steps.deploy.outputs.IMPL }}
+        run: |
+          ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq --arg p "$PROXY" --arg i "$IMPL" --arg t "$ts" \
+             '.proxyV2=$p | .implementation=$i | .updatedAt=$t | .network=($ENV == "mainnet" ? "base" : "basesepolia")' \
+             "$DEP" > tmp.json || jq -n --arg p "$PROXY" --arg i "$IMPL" --arg t "$ts" \
+             '{proxyV2:$p, implementation:$i, updatedAt:$t}' > tmp.json
+          mv tmp.json "$DEP"
+          cat "$DEP"
+
+      - name: Commit deployments
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deployments/*.json
+          git commit -m "chore(deployments): add V2 proxy and implementation for ${{ github.event.inputs.network }}"
+          git push
