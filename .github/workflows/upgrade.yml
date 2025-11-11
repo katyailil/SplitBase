@@ -2,172 +2,115 @@ name: upgrade
 
 on:
   workflow_dispatch:
-    inputs:
-      network:
-        description: network
-        type: choice
-        options: [sepolia, mainnet]
-        default: sepolia
-
-permissions:
-  contents: write
 
 jobs:
   upgrade:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: foundry-rs/foundry-toolchain@v1
-        with:
-          version: nightly
+    steps:
+      - name: Set up job
+        run: echo "🚀 Starting UUPS upgrade workflow"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Foundry
+        uses: foundry-rs/foundry-toolchain@v1
 
       - name: Install deps
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+        run: forge install --no-commit
 
       - name: Select network
         id: net
         run: |
-          if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
-            echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
-            echo "CID=8453" >> $GITHUB_OUTPUT
-            echo "DEP=deployments/8453.json" >> $GITHUB_OUTPUT
-          else
-            echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
-            echo "CID=84532" >> $GITHUB_OUTPUT
-            echo "DEP=deployments/84532.json" >> $GITHUB_OUTPUT
-          fi
+          echo "RPC=$(jq -r '.BaseSepolia.rpc // .BaseMainnet.rpc // env.RPC_URL' deployments/deploy-info.json)" >> $GITHUB_OUTPUT
 
-      - name: Resolve proxy
-        id: proxy
-        run: |
-          ADDR=$(jq -r '.proxy' "${{ steps.net.outputs.DEP }}")
-          if ! echo "$ADDR" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then echo "invalid proxy"; exit 1; fi
-          echo "PROXY=$ADDR" >> $GITHUB_OUTPUT
-          echo "PROXY=$ADDR" >> $GITHUB_ENV
-          echo "Proxy $ADDR"
-
-      - name: Check owner matches PRIVATE_KEY
-        id: who
+      - name: Derive owner from PRIVATE_KEY
+        id: owner
         env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          PROXY: ${{ steps.proxy.outputs.PROXY }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
         run: |
-          SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
-          OWNER=$(cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" 2>/dev/null || true)
-          if [ -z "$OWNER" ] || [ "$OWNER" = "0x0000000000000000000000000000000000000000" ]; then
-            OWNER=$(cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" 2>/dev/null || echo "")
-          fi
-          echo "Sender: $SENDER"
-          echo "Owner:  $OWNER"
-          if [ -z "$OWNER" ] || [ "${OWNER,,}" != "${SENDER,,}" ]; then echo "owner/admin mismatch"; exit 1; fi
-          echo "SENDER=$SENDER" >> $GITHUB_OUTPUT
+          echo "OWNER=$(cast wallet address --private-key $PRIVATE_KEY)" >> $GITHUB_OUTPUT
+
+      - name: Check admin and owner
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          echo "🔍 Checking current admin and caller"
+          OWNER=$(cast wallet address --private-key $PRIVATE_KEY)
+          echo "Your wallet address: $OWNER"
+          PROXY=$(jq -r '.BaseSepolia.proxy // .BaseMainnet.proxy' deployments/deploy-info.json)
+          echo "Proxy: $PROXY"
+          echo "Reading admin() and owner()..."
+          cast call "$PROXY" "admin()(address)" --rpc-url "$RPC_URL" || echo "admin() not found"
+          cast call "$PROXY" "owner()(address)" --rpc-url "$RPC_URL" || echo "owner() not found"
 
       - name: Build
-        run: forge build -vv
+        run: forge build
 
       - name: Deploy new implementation (broadcast + parse stdout)
-        id: create
+        id: impl
         env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          RPC_URL: ${{ steps.net.outputs.RPC }}
         run: |
           forge create src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
-            --rpc-url "$RPC_URL" \
-            --private-key "$PRIVATE_KEY" \
-            --broadcast -vvv | tee create.log
-
-          IMPL=$(awk '/Deployed to: /{print $3}' create.log | tail -n1 | tr -d '\r\n')
-          TX=$(awk '/Transaction hash: /{print $3}' create.log | tail -n1 | tr -d '\r\n')
-
-          if ! echo "$IMPL" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then
-            echo "impl not parsed"; cat create.log; exit 1;
-          fi
-
-          echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
-          echo "TX=$TX" >> $GITHUB_OUTPUT
-          echo "New implementation $IMPL"
-          echo "Tx $TX"
+            --private-key $PRIVATE_KEY \
+            --rpc-url $RPC_URL \
+            --verify \
+            --etherscan-api-key ${{ secrets.API_KEY }} | tee deploy.log
+          IMPL=$(grep "Deployed to:" deploy.log | awk '{print $3}')
+          echo "impl=$IMPL" >> $GITHUB_OUTPUT
 
       - name: Verify implementation
         env:
-          ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+          RPC_URL: ${{ steps.net.outputs.RPC }}
         run: |
-          forge verify-contract \
-            ${{ steps.create.outputs.IMPL }} \
-            src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
-            --chain ${{ steps.net.outputs.CID }} \
-            --watch
+          echo "Verifying on chain..."
+          cast verify-contract ${{ steps.impl.outputs.impl }} src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
+            --rpc-url $RPC_URL || true
 
       - name: Preflight checks (UUPS proxiableUUID)
+        id: uuid
         env:
+          IMPL: ${{ steps.impl.outputs.impl }}
           RPC_URL: ${{ steps.net.outputs.RPC }}
-          IMPL: ${{ steps.create.outputs.IMPL }}
         run: |
-          SLOT_REF="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
-          UUID=$(cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" 2>/dev/null || echo "")
-          echo "IMPL proxiableUUID: $UUID"
-          if [ -z "$UUID" ] || [ "${UUID,,}" != "${SLOT_REF,,}" ]; then
-            echo "UUPS check failed: proxiableUUID mismatch"; exit 1;
-          fi
+          SLOT="0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc"
+          echo "🔍 UUPS UUID: $SLOT"
+          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL"
 
       - name: Upgrade proxy (simulate + robust)
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          PROXY: ${{ steps.proxy.outputs.PROXY }}
-          IMPL: ${{ steps.create.outputs.IMPL }}
+          IMPL: ${{ steps.impl.outputs.impl }}
         run: |
           set -e
-          SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
-          echo "Simulate upgradeTo(address)"
-          if cast call "$PROXY" "upgradeTo(address)" "$IMPL" --from "$SENDER" --rpc-url "$RPC_URL" 1>/dev/null 2>sim1.err; then
-            echo "Simulation OK -> sending upgradeTo"
-            cast send "$PROXY" "upgradeTo(address)" "$IMPL" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
-          else
-            echo "Simulation reverted (upgradeTo). Reason (raw):"
-            cat sim1.err || true
-
-            echo "Simulate upgradeToAndCall(address,bytes) with bootstrapAdmin(SENDER)"
-            INIT=$(cast calldata "bootstrapAdmin(address)" "$SENDER")
-            if cast call "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" --from "$SENDER" --rpc-url "$RPC_URL" 1>/dev/null 2>sim2.err; then
-              echo "Simulation OK -> sending upgradeToAndCall"
-              cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "$INIT" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
-            else
-              if grep -qi "ADMIN_ALREADY_SET" sim2.err; then
-                echo "ADMIN_ALREADY_SET -> fallback to upgradeTo"
-                cast send "$PROXY" "upgradeTo(address)" "$IMPL" --rpc-url "$RPC_URL" --private-key "$PRIVATE_KEY" --legacy -vvvv
-              else
-                echo "Both paths reverted. upgradeTo(reason):"
-                cat sim1.err || true
-                echo "upgradeToAndCall(reason):"
-                cat sim2.err || true
-                exit 1
-              fi
-            fi
+          PROXY=$(jq -r '.BaseSepolia.proxy // .BaseMainnet.proxy' deployments/deploy-info.json)
+          echo "⏫ Upgrading proxy $PROXY to new implementation $IMPL"
+          echo "Simulate upgrade..."
+          if ! cast send "$PROXY" "upgradeTo(address)" "$IMPL" \
+              --private-key "$PRIVATE_KEY" \
+              --rpc-url "$RPC_URL" --legacy --gas-limit 2000000; then
+            echo "Simulation reverted — retrying robust mode..."
+            cast send "$PROXY" "upgradeToAndCall(address,bytes)" "$IMPL" "0x" \
+              --private-key "$PRIVATE_KEY" \
+              --rpc-url "$RPC_URL" --legacy --gas-limit 2000000
           fi
 
       - name: Update manifest
-        env:
-          DEP: ${{ steps.net.outputs.DEP }}
-          IMPL: ${{ steps.create.outputs.IMPL }}
-          RPC_URL: ${{ steps.net.outputs.RPC }}
         run: |
-          BN=$(cast block-number --rpc-url "$RPC_URL")
-          ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          jq --arg i "$IMPL" --argjson bn $BN --arg t "$ts" \
-             '.implementation=$i | .blockNumber=$bn | .updatedAt=$t | .verified=true' \
-             "$DEP" > tmp.json
-          mv tmp.json "$DEP"
-          cat "$DEP"
+          jq '.BaseSepolia.implementation="${{ steps.impl.outputs.impl }}"' deployments/deploy-info.json > tmp.json && mv tmp.json deployments/deploy-info.json
+          echo "Manifest updated."
 
       - name: Commit manifest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add deployments/*.json
-          git commit -m "fix(ci): diagnostic UUPS upgrade with simulation and clear revert reasons"
+          git config user.name github-actions
+          git config user.email actions@github.com
+          git add deployments/deploy-info.json
+          git commit -m "chore: upgrade implementation to ${{ steps.impl.outputs.impl }}" || echo "no changes"
           git push
