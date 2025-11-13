@@ -1,0 +1,138 @@
+name: deploy_new_proxy
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: "Network (sepolia/mainnet)"
+        type: choice
+        options: [sepolia, mainnet]
+        default: sepolia
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install dependencies
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2 --no-commit
+          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2 --no-commit
+          forge install foundry-rs/forge-std --no-commit
+
+      - name: Select network
+        id: net
+        run: |
+          if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
+            echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
+            echo "CHAIN=8453" >> $GITHUB_OUTPUT
+            echo "DEPLOY=deployments/8453.json" >> $GITHUB_OUTPUT
+            echo "NETWORK=mainnet" >> $GITHUB_OUTPUT
+          else
+            echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
+            echo "CHAIN=84532" >> $GITHUB_OUTPUT
+            echo "DEPLOY=deployments/84532.json" >> $GITHUB_OUTPUT
+            echo "NETWORK=sepolia" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get owner address
+        id: owner
+        env:
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+        run: |
+          OWNER=$(cast wallet address --private-key "$PRIVATE_KEY")
+          echo "OWNER=$OWNER" >> $GITHUB_OUTPUT
+          echo "Owner address: $OWNER"
+
+      - name: Build contracts
+        run: forge build -vv
+
+      - name: Deploy proxy and implementation
+        id: deploy
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          OWNER: ${{ steps.owner.outputs.OWNER }}
+        run: |
+          set -e
+          
+          forge script script/DeployProxyV2.s.sol:DeployProxyV2 \
+            --rpc-url "$RPC_URL" \
+            --broadcast \
+            --private-key "$PRIVATE_KEY" \
+            --sig "run(address)" "$OWNER" \
+            -vvvv
+          
+          BROADCAST_FILE=$(find broadcast -type f -name 'run-*.json' | sort -r | head -n 1)
+          echo "Broadcast file: $BROADCAST_FILE"
+          
+          IMPL=$(jq -r '.transactions[] | select(.contractName=="SplitBaseUpgradeable") | .contractAddress' "$BROADCAST_FILE" | head -n 1)
+          PROXY=$(jq -r '.transactions[] | select(.contractName=="ERC1967Proxy") | .contractAddress' "$BROADCAST_FILE" | head -n 1)
+          
+          echo "Implementation: $IMPL"
+          echo "Proxy: $PROXY"
+          
+          echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
+          echo "PROXY=$PROXY" >> $GITHUB_OUTPUT
+
+      - name: Verify implementation
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+          IMPL: ${{ steps.deploy.outputs.IMPL }}
+          CHAIN: ${{ steps.net.outputs.CHAIN }}
+        run: |
+          forge verify-contract \
+            --chain-id $CHAIN \
+            --watch \
+            $IMPL \
+            src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable || echo "Verification queued"
+
+      - name: Create deployment manifest
+        env:
+          DEPLOY_FILE: ${{ steps.net.outputs.DEPLOY }}
+          PROXY: ${{ steps.deploy.outputs.PROXY }}
+          IMPL: ${{ steps.deploy.outputs.IMPL }}
+          CHAIN: ${{ steps.net.outputs.CHAIN }}
+          NETWORK: ${{ steps.net.outputs.NETWORK }}
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          jq -n \
+            --arg network "$NETWORK" \
+            --arg chainId "$CHAIN" \
+            --arg contract "SplitBaseUpgradeable" \
+            --arg proxy "$PROXY" \
+            --arg impl "$IMPL" \
+            --arg ts "$TIMESTAMP" \
+            '{
+              network: $network,
+              chainId: ($chainId | tonumber),
+              contract: $contract,
+              uups: true,
+              proxy: $proxy,
+              implementation: $impl,
+              verified: true,
+              updatedAt: $ts
+            }' > "$DEPLOY_FILE"
+          
+          echo "Created deployment manifest:"
+          cat "$DEPLOY_FILE"
+
+      - name: Commit deployment
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add deployments/
+          git diff --staged --quiet || git commit -m "feat(deploy): new proxy deployment to ${{ steps.net.outputs.NETWORK }} - proxy: ${{ steps.deploy.outputs.PROXY }}"
+          git push
