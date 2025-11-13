@@ -4,7 +4,11 @@ out = "out"
 libs = ["lib"]
 solc_version = "0.8.24"
 evm_version = "paris"
-ffi = false
+remappings = [
+    "openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/",
+    "openzeppelin-contracts/=lib/openzeppelin-contracts/",
+    "forge-std/=lib/forge-std/src/"
+]
 
 [rpc_endpoints]
 base_sepolia = "${BASE_SEPOLIA_RPC_URL}"
