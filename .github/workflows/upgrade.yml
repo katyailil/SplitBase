@@ -9,14 +9,6 @@ on:
         options: [sepolia, mainnet]
         default: sepolia
         required: true
-      rpc_url:
-        description: "Custom RPC URL (optional)"
-        type: string
-        required: false
-      proxy:
-        description: "Proxy address (optional; otherwise read from deployments)"
-        type: string
-        required: false
 
 jobs:
   upgrade:
@@ -28,171 +20,121 @@ jobs:
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install dependencies
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2 --no-commit
+          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2 --no-commit
+          forge install foundry-rs/forge-std --no-commit
 
       - name: Select network
         id: net
-        env:
-          IN_NET:  ${{ github.event.inputs.network }}
-          IN_RPC:  ${{ github.event.inputs.rpc_url }}
-          RPC_SEP: ${{ secrets.BASE_SEPOLIA_RPC_URL }}
-          RPC_MAIN:${{ secrets.BASE_MAINNET_RPC_URL }}
         run: |
-          if [ "$IN_NET" = "sepolia" ]; then
+          if [ "${{ github.event.inputs.network }}" = "sepolia" ]; then
             echo "CHAIN=84532" >> $GITHUB_OUTPUT
             echo "DEPLOY=deployments/84532.json" >> $GITHUB_OUTPUT
-            DEF_RPC="$RPC_SEP"
+            echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
           else
             echo "CHAIN=8453" >> $GITHUB_OUTPUT
             echo "DEPLOY=deployments/8453.json" >> $GITHUB_OUTPUT
-            DEF_RPC="$RPC_MAIN"
+            echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
           fi
-          RPC="${IN_RPC:-$DEF_RPC}"
-          test -n "$RPC" || { echo "RPC URL is not set"; exit 1; }
-          echo "RPC=$RPC" >> $GITHUB_OUTPUT
 
       - name: Resolve proxy
         id: addr
-        env:
-          IN_PROXY:   ${{ github.event.inputs.proxy }}
-          DEPLOY_FILE:${{ steps.net.outputs.DEPLOY }}
         run: |
-          if [ -n "$IN_PROXY" ]; then
-            echo "PROXY=$IN_PROXY" >> $GITHUB_OUTPUT
-          else
-            test -f "$DEPLOY_FILE" || { echo "No $DEPLOY_FILE"; exit 1; }
-            PROXY=$(jq -r '.proxy' "$DEPLOY_FILE")
-            test "$PROXY" != "null" -a -n "$PROXY" || { echo "Proxy not found in $DEPLOY_FILE"; exit 1; }
-            echo "PROXY=$PROXY" >> $GITHUB_OUTPUT
-          fi
-          echo "Using proxy: ${PROXY:-$IN_PROXY}"
+          PROXY=$(jq -r '.proxy' ${{ steps.net.outputs.DEPLOY }})
+          echo "PROXY=$PROXY" >> $GITHUB_OUTPUT
+          echo "Using proxy: $PROXY"
 
       - name: Build
-        run: forge build -v
+        run: forge build -vv
 
-      - name: Deploy implementation (broadcast + parse)
+      - name: Deploy new implementation
         id: impl
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          RPC_URL:     ${{ steps.net.outputs.RPC }}
+          RPC_URL: ${{ steps.net.outputs.RPC }}
         run: |
           set -e
-          mkdir -p out/ci
           forge create src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
             --private-key "$PRIVATE_KEY" \
             --rpc-url "$RPC_URL" \
-            --broadcast \
-            --json > out/ci/create.json
+            --json > deploy.json
 
-          IMPL=$(jq -r '
-              .deployedTo
-              // .receipts[0].contractAddress
-              // .transactions[0].contractAddress
-              ' out/ci/create.json)
-
+          IMPL=$(jq -r '.deployedTo // .receipts[0].contractAddress // .transactions[0].contractAddress' deploy.json)
+          
           if [ -z "$IMPL" ] || [ "$IMPL" = "null" ]; then
-            echo "create.json:" && cat out/ci/create.json
-            echo "Failed to detect implementation address"; exit 1;
+            echo "Failed to get implementation address"
+            cat deploy.json
+            exit 1
           fi
+          
           echo "IMPL=$IMPL" >> $GITHUB_OUTPUT
-          echo "Implementation: $IMPL"
+          echo "Implementation deployed: $IMPL"
 
-      - name: Verify implementation (best-effort)
+      - name: Verify implementation
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
+          IMPL: ${{ steps.impl.outputs.IMPL }}
+          CHAIN: ${{ steps.net.outputs.CHAIN }}
+        run: |
+          forge verify-contract \
+            --chain-id $CHAIN \
+            --watch \
+            $IMPL \
+            src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable || echo "Verification queued"
+
+      - name: Upgrade proxy
         env:
           RPC_URL: ${{ steps.net.outputs.RPC }}
-          API_KEY: ${{ secrets.API_KEY }}
-          IMPL:    ${{ steps.impl.outputs.IMPL }}
-        run: |
-          cast verify-contract "$IMPL" \
-            src/SplitBaseUpgradeable.sol:SplitBaseUpgradeable \
-            --rpc-url "$RPC_URL" \
-            --etherscan-api-key "$API_KEY" || true
-
-      - name: Preflight proxiableUUID (best-effort)
-        env:
-          RPC_URL: ${{ steps.net.outputs.RPC }}
-          IMPL:    ${{ steps.impl.outputs.IMPL }}
-        run: |
-          cast call "$IMPL" "proxiableUUID()(bytes32)" --rpc-url "$RPC_URL" || true
-
-      - name: Upgrade proxy (nonce fixed + gas bump + retry)
-        env:
-          RPC_URL:     ${{ steps.net.outputs.RPC }}
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          PROXY:       ${{ steps.addr.outputs.PROXY }}
-          IMPL:        ${{ steps.impl.outputs.IMPL }}
+          PROXY: ${{ steps.addr.outputs.PROXY }}
+          IMPL: ${{ steps.impl.outputs.IMPL }}
         run: |
           set -e
-
+          
           SENDER=$(cast wallet address --private-key "$PRIVATE_KEY")
-          NONCE=$(cast nonce "$SENDER" --rpc-url "$RPC_URL")
-
-          BASE=$(cast gas-price --rpc-url "$RPC_URL")
-          MAX_FEE=$(( BASE * 12 / 10 ))   # +20%
-          PRIO=$(( BASE / 10 ))
-          if [ $PRIO -lt 1000000000 ]; then PRIO=1000000000; fi
-
-          echo "sender=$SENDER nonce=$NONCE base=$BASE maxFee=$MAX_FEE prio=$PRIO"
-
-          send() {
-            SIG="$1"; shift
-            cast send "$PROXY" "$SIG" "$@" \
-              --private-key "$PRIVATE_KEY" \
-              --rpc-url "$RPC_URL" \
-              --nonce "$NONCE" \
-              --priority-gas-price "$PRIO" \
-              --max-fee-per-gas "$MAX_FEE" \
-              --gas-limit 2200000
-          }
-
-          set +e
-          OUT=$(send "upgradeTo(address)" "$IMPL" 2>&1)
-          RC=$?
-          echo "$OUT"
-
-          if [ $RC -ne 0 ] && echo "$OUT" | grep -qi "underpriced"; then
-            echo "Underpriced → bumping fees and retrying same nonce…"
-            MAX_FEE=$(( MAX_FEE * 5 / 4 ))   # +25%
-            PRIO=$(( PRIO * 5 / 4 ))
-            OUT=$(send "upgradeTo(address)" "$IMPL" 2>&1)
-            RC=$?
-            echo "$OUT"
+          echo "Sender: $SENDER"
+          
+          BASE_GAS=$(cast gas-price --rpc-url "$RPC_URL")
+          MAX_FEE=$(echo "$BASE_GAS * 15 / 10" | bc)
+          PRIORITY=$(echo "$BASE_GAS / 5" | bc)
+          
+          if [ $(echo "$PRIORITY < 1000000000" | bc) -eq 1 ]; then
+            PRIORITY=1000000000
           fi
+          
+          echo "Gas: base=$BASE_GAS max=$MAX_FEE priority=$PRIORITY"
+          
+          cast send "$PROXY" \
+            "upgradeTo(address)" "$IMPL" \
+            --private-key "$PRIVATE_KEY" \
+            --rpc-url "$RPC_URL" \
+            --priority-gas-price "$PRIORITY" \
+            --gas-limit 500000 \
+            --confirmations 2
+          
+          echo "Upgrade successful!"
 
-          if [ $RC -ne 0 ]; then
-            echo "Fallback: upgradeToAndCall(address,bytes)"
-            OUT=$(send "upgradeToAndCall(address,bytes)" "$IMPL" "0x" 2>&1)
-            RC=$?
-            echo "$OUT"
-
-            if [ $RC -ne 0 ] && echo "$OUT" | grep -qi "underpriced"; then
-              echo "Underpriced again → bump and retry"
-              MAX_FEE=$(( MAX_FEE * 5 / 4 ))
-              PRIO=$(( PRIO * 5 / 4 ))
-              OUT=$(send "upgradeToAndCall(address,bytes)" "$IMPL" "0x" 2>&1)
-              RC=$?
-              echo "$OUT"
-            fi
-          fi
-          set -e
-
-          test $RC -eq 0 || { echo "Upgrade failed"; exit $RC; }
-          echo "Upgrade transaction submitted."
-
-      - name: Update deployments manifest
+      - name: Update deployment manifest
         env:
           DEPLOY_FILE: ${{ steps.net.outputs.DEPLOY }}
-          IMPL:        ${{ steps.impl.outputs.IMPL }}
+          IMPL: ${{ steps.impl.outputs.IMPL }}
         run: |
-          tmp=$(mktemp)
-          jq --arg impl "$IMPL" '.implementation=$impl | .verified=true' "$DEPLOY_FILE" > "$tmp"
-          mv "$tmp" "$DEPLOY_FILE"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq --arg impl "$IMPL" --arg ts "$TIMESTAMP" \
+            '.implementation=$impl | .verified=true | .updatedAt=$ts' \
+            "$DEPLOY_FILE" > tmp.json
+          mv tmp.json "$DEPLOY_FILE"
+          cat "$DEPLOY_FILE"
 
-      - name: Commit manifest
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit changes
         run: |
-          git config user.name github-actions
-          git config user.email actions@github.com
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add deployments/
-          git commit -m "ci(upgrade): robust resend on 'replacement transaction underpriced'; fixed variadic send(); impl ${{ steps.impl.outputs.IMPL }}" || true
+          git diff --staged --quiet || git commit -m "feat(upgrade): deploy implementation ${{ steps.impl.outputs.IMPL }} to ${{ github.event.inputs.network }}"
           git push
