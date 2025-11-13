@@ -5,8 +5,8 @@ libs = ["lib"]
 solc_version = "0.8.24"
 evm_version = "paris"
 remappings = [
-  "openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/",
-  "openzeppelin-contracts/=lib/openzeppelin-contracts/",
+  "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
   "forge-std/=lib/forge-std/src/"
 ]
 
