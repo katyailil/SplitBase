@@ -8,19 +8,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
 
+      - name: Initialize submodules
+        run: |
+          git submodule update --init --recursive
+          git submodule status
+
       - name: Verify libraries loaded
         run: |
           echo "Checking submodules..."
           ls -la lib/
-          ls -la lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/ | head -5
+          echo "---"
+          if [ -d "lib/openzeppelin-contracts-upgradeable/contracts" ]; then
+            echo "✓ OpenZeppelin Upgradeable found"
+            ls lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/ | head -5
+          else
+            echo "✗ OpenZeppelin Upgradeable NOT found"
+            exit 1
+          fi
 
       - name: Build
         run: forge build --sizes
