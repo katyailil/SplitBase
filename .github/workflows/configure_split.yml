@@ -1,0 +1,80 @@
+name: configure_split
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: "Network"
+        type: choice
+        options: [sepolia, mainnet]
+        default: sepolia
+        required: true
+      recipients:
+        description: "Recipients (comma-separated addresses)"
+        required: true
+        default: "0x0000000000000000000000000000000000000001,0x0000000000000000000000000000000000000002"
+      shares:
+        description: "Shares (comma-separated numbers)"
+        required: true
+        default: "50,50"
+
+jobs:
+  configure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install dependencies
+        run: |
+          forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2 --no-commit
+          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2 --no-commit
+          forge install foundry-rs/forge-std --no-commit
+
+      - name: Select network
+        id: net
+        run: |
+          if [ "${{ github.event.inputs.network }}" = "mainnet" ]; then
+            echo "RPC=${{ secrets.BASE_MAINNET_RPC_URL }}" >> $GITHUB_OUTPUT
+            echo "DEPLOY=deployments/8453.json" >> $GITHUB_OUTPUT
+          else
+            echo "RPC=${{ secrets.BASE_SEPOLIA_RPC_URL }}" >> $GITHUB_OUTPUT
+            echo "DEPLOY=deployments/84532.json" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get proxy address
+        id: proxy
+        run: |
+          PROXY=$(jq -r '.proxy' ${{ steps.net.outputs.DEPLOY }})
+          echo "PROXY=$PROXY" >> $GITHUB_OUTPUT
+          echo "Using proxy: $PROXY"
+
+      - name: Build
+        run: forge build -vv
+
+      - name: Configure split
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          PROXY: ${{ steps.proxy.outputs.PROXY }}
+          RECIPIENTS: ${{ github.event.inputs.recipients }}
+          SHARES: ${{ github.event.inputs.shares }}
+        run: |
+          forge script script/ConfigureSplit.s.sol:ConfigureSplit \
+            --rpc-url "$RPC_URL" \
+            --broadcast \
+            --private-key "$PRIVATE_KEY" \
+            -vvvv
+
+      - name: Verify configuration
+        env:
+          RPC_URL: ${{ steps.net.outputs.RPC }}
+          PROXY: ${{ steps.proxy.outputs.PROXY }}
+        run: |
+          echo "Getting split configuration..."
+          cast call "$PROXY" "getSplitConfig()(address[],uint256[],uint256,bool)" --rpc-url "$RPC_URL"
