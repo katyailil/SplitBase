@@ -12,6 +12,13 @@ yarn-error.log*
 # Foundry
 out/
 cache/
+broadcast/
+!broadcast/.gitkeep
 
-# Misc
+# Environment
 .env
+.env.local
+
+# Test reports
+coverage/
+lcov.info
