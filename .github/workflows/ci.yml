@@ -8,14 +8,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: nightly
 
-      - name: Install dependencies
-        run: forge install
+      - name: Verify libraries loaded
+        run: |
+          echo "Checking submodules..."
+          ls -la lib/
+          ls -la lib/openzeppelin-contracts-upgradeable/contracts/proxy/utils/ | head -5
 
       - name: Build
         run: forge build --sizes
