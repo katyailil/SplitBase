@@ -4,32 +4,81 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: version tag (e.g. v0.1.0)
+        description: "Version tag (e.g., v1.0.0)"
         required: true
-        default: v0.1.0
+        default: "v1.0.0"
+      prerelease:
+        description: "Mark as pre-release"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
-  make-release:
+  release:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: List deployment files
+      - name: Validate deployment files
         run: |
-          ls -la deployments || true
+          echo "Checking deployment manifests..."
+          for file in deployments/*.json; do
+            echo "File: $file"
+            jq '.' "$file"
+            echo "---"
+          done
 
-      - name: Create pre-release
+      - name: Create release notes
+        id: notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          # 🚀 SplitBase Release ${{ github.event.inputs.tag }}
+          
+          ## 📋 Deployments
+          
+          ### Base Mainnet (8453)
+          - **Proxy**: `$(jq -r '.proxy' deployments/8453.json)`
+          - **Implementation**: `$(jq -r '.implementation' deployments/8453.json)`
+          - **Verified**: $(jq -r '.verified' deployments/8453.json)
+          
+          ### Base Sepolia (84532)
+          - **Proxy**: `$(jq -r '.proxy' deployments/84532.json)`
+          - **Implementation**: `$(jq -r '.implementation' deployments/84532.json)`
+          - **Verified**: $(jq -r '.verified' deployments/84532.json)
+          
+          ## ✨ Features
+          
+          - ⚡ Automatic revenue distribution
+          - 💰 ETH and ERC-20 token support
+          - 🔐 UUPS upgradeable pattern
+          - 📊 On-chain event tracking
+          - ✅ Verified on BaseScan
+          
+          ## 📦 Deployment Manifests
+          
+          Download the deployment manifests below for integration.
+          
+          ## 🔗 Links
+          
+          - [GitHub Repository](https://github.com/katyailil/SplitBase)
+          - [Base Mainnet Explorer](https://basescan.org/address/$(jq -r '.proxy' deployments/8453.json))
+          - [Base Sepolia Explorer](https://sepolia.basescan.org/address/$(jq -r '.proxy' deployments/84532.json))
+          EOF
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
-          prerelease: true
+          name: "Release ${{ github.event.inputs.tag }}"
+          body_path: release_notes.md
+          prerelease: ${{ github.event.inputs.prerelease }}
           files: |
-            deployments/8453.json
-            deployments/84532.json
+            deployments/*.json
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
