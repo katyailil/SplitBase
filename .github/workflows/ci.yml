@@ -8,6 +8,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
@@ -16,14 +18,6 @@ jobs:
 
       - name: Show forge version
         run: forge --version
-
-      - name: Install dependencies (OZ + forge-std)
-        run: |
-          mkdir -p lib
-          forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2
-          forge install OpenZeppelin/openzeppelin-contracts@v5.0.2
-          forge install foundry-rs/forge-std
-          ls -la lib
 
       - name: Build
         run: forge build -vv
