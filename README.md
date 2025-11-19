@@ -1,6 +1,6 @@
 # SplitBase
 
-Advanced on-chain revenue distribution system for Base network.
+Production-grade on-chain revenue distribution system for Base network.
 
 ## Overview
 
