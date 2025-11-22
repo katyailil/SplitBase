@@ -18,7 +18,7 @@ jobs:
   upgrade:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
@@ -43,7 +43,7 @@ jobs:
           echo "with new implementation address from deployment"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: upgrade-${{ inputs.network }}
           path: broadcast/
