@@ -43,8 +43,7 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
     }
 
     function initialize(address _usdc) external initializer {
-        __UUPSUpgradeable_init();
-        __Ownable_init();
+        __Ownable_init(msg.sender);
         usdc = IERC20(_usdc);
         _nextPoolId = 1;
     }
