@@ -1,10 +1,10 @@
-name: Deploy to Base
+name: Deploy Standard Contracts
 
 on:
   workflow_dispatch:
     inputs:
       network:
-        description: 'Network to deploy to'
+        description: 'Network (base_sepolia for testing, base for production)'
         required: true
         type: choice
         options:

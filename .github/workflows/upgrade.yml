@@ -1,17 +1,17 @@
-name: Upgrade Contract
+name: Upgrade Contracts
 
 on:
   workflow_dispatch:
     inputs:
       network:
-        description: 'Network'
+        description: 'Network (same as deployment)'
         required: true
         type: choice
         options:
           - base_sepolia
           - base
       proxy_address:
-        description: 'Proxy contract address'
+        description: 'Proxy contract address (not implementation!)'
         required: true
 
 jobs:

@@ -1,10 +1,10 @@
-name: Deploy Upgradeable Proxy
+name: Deploy Upgradeable Contracts
 
 on:
   workflow_dispatch:
     inputs:
       network:
-        description: 'Network to deploy to'
+        description: 'Network (base_sepolia recommended)'
         required: true
         type: choice
         options:
