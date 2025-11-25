@@ -25,10 +25,12 @@ jobs:
       - name: Deploy proxy implementation
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
         run: |
           forge script script/DeployProxy.s.sol \
             --rpc-url ${{ inputs.network }} \
             --broadcast \
+            --verify \
             -vvvv
 
       - name: Upload deployment artifacts
