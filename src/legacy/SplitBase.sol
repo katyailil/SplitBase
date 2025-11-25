@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {ISplitBase} from "./interfaces/ISplitBase.sol";
-import {IERC20} from "./interfaces/IERC20.sol";
+import {ISplitBase} from "../interfaces/ISplitBase.sol";
+import {IERC20} from "../interfaces/IERC20.sol";
 
 contract SplitBase is ISplitBase {
     error Unauthorized();
