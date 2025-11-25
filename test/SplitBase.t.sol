@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {SplitBase} from "../src/SplitBase.sol";
+import {SplitBase} from "../src/legacy/SplitBase.sol";
 import {IERC20} from "../src/interfaces/IERC20.sol";
 
 contract MockERC20 is IERC20 {

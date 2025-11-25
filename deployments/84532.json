@@ -1,0 +1,12 @@
+{
+  "chainId": 84532,
+  "deployer": "0xE5a8edaF0B63b22F51A32062798fB03aC024b66d",
+  "executorImplementation": "0xD187849ff6e1042adF182e97FA197512dB1A28f4",
+  "executorProxy": "0x7543430E7494eBB7748BE4C6Af70cA9F1A6d2F84",
+  "network": "base-sepolia",
+  "registryImplementation": "0x34aec145B7b2a0922112545C8D9bC20bd551F901",
+  "registryProxy": "0xF0f141DeB225D9D4639dF1E6E91bE4bC90EDD5eE",
+  "splitBaseImplementation": "0xc41b9c958109ebcD0Ff3794C30D4d151490a2975",
+  "splitBaseProxy": "0x62B52D21db12E4A709a49c043e31adfdAB41FB39",
+  "timestamp": 1764058302
+}

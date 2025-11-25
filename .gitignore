@@ -6,3 +6,6 @@ broadcast/
 lcov.info
 .vscode/
 .idea/
+
+deployments/*.json
+!deployments/*.example

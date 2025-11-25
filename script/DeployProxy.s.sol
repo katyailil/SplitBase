@@ -72,5 +72,47 @@ contract DeployProxyScript is Script {
         console.log("All contracts owned by:", deployer);
         console.log("All contracts are UPGRADEABLE via UUPS pattern");
         console.log("==============================================");
+
+        _saveDeployment(
+            block.chainid,
+            deployer,
+            address(splitBaseProxy),
+            address(splitBaseImpl),
+            address(registryProxy),
+            address(registryImpl),
+            address(executorProxy),
+            address(executorImpl)
+        );
+    }
+
+    function _saveDeployment(
+        uint256 chainId,
+        address deployer,
+        address splitBaseProxy,
+        address splitBaseImpl,
+        address registryProxy,
+        address registryImpl,
+        address executorProxy,
+        address executorImpl
+    ) internal {
+        string memory network = chainId == 8453 ? "base" : "base-sepolia";
+
+        string memory json = "deployment";
+        vm.serializeString(json, "network", network);
+        vm.serializeUint(json, "chainId", chainId);
+        vm.serializeAddress(json, "deployer", deployer);
+        vm.serializeUint(json, "timestamp", block.timestamp);
+
+        vm.serializeAddress(json, "splitBaseProxy", splitBaseProxy);
+        vm.serializeAddress(json, "splitBaseImplementation", splitBaseImpl);
+        vm.serializeAddress(json, "registryProxy", registryProxy);
+        vm.serializeAddress(json, "registryImplementation", registryImpl);
+        vm.serializeAddress(json, "executorProxy", executorProxy);
+        string memory finalJson = vm.serializeAddress(json, "executorImplementation", executorImpl);
+
+        string memory filename = string.concat("./deployments/", vm.toString(chainId), ".json");
+        vm.writeJson(finalJson, filename);
+
+        console.log("\nDeployment data saved to:", filename);
     }
 }
