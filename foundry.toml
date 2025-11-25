@@ -10,6 +10,7 @@ evm_version = "cancun"
 remappings = [
     "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/"
 ]
+fs_permissions = [{ access = "read-write", path = "./deployments" }]
 
 [rpc_endpoints]
 base = "https://mainnet.base.org"
