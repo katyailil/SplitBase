@@ -1,0 +1,12 @@
+{
+  "chainId": 8453,
+  "deployer": "0xE5a8edaF0B63b22F51A32062798fB03aC024b66d",
+  "executorImplementation": "0x6d885ecD6c8562a23e13fD97CC39fbf12aE8E9dd",
+  "executorProxy": "0x317761Bb59448f6C02Ad28275f928fb77C710802",
+  "network": "base",
+  "registryImplementation": "0x4125d418Fe36a755F5eEB7c502ca3e00750cDDd8",
+  "registryProxy": "0xEa10580212A12c98eE0ebACbBC595af2062a81B0",
+  "splitBaseImplementation": "0xC680FA2Ba45f01B84E7962cBbe8cDc98dD20Ad72",
+  "splitBaseProxy": "0x9A1f27779561269Ac8bFFdd152D1F8f2C445FC3e",
+  "timestamp": 1764058313
+}
