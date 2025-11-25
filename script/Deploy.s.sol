@@ -2,9 +2,9 @@
 pragma solidity ^0.8.28;
 
 import {Script, console} from "forge-std/Script.sol";
-import {SplitBase} from "../src/SplitBase.sol";
-import {Registry} from "../src/Registry.sol";
-import {Executor} from "../src/Executor.sol";
+import {SplitBase} from "../src/legacy/SplitBase.sol";
+import {Registry} from "../src/legacy/Registry.sol";
+import {Executor} from "../src/legacy/Executor.sol";
 
 contract DeployScript is Script {
     address constant BASE_USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;

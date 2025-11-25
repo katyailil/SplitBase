@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {Registry} from "../src/Registry.sol";
+import {Registry} from "../src/legacy/Registry.sol";
 
 contract RegistryTest is Test {
     Registry public registry;
