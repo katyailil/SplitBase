@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ExecutorV1} from "../src/ExecutorV1.sol";
 import {SplitBaseV1} from "../src/SplitBaseV1.sol";
 import {MockUSDC} from "./mocks/MockUSDC.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts-upgradeable/proxy/ERC1967/ERC1967Proxy.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract ExecutorV1Test is Test {
     ExecutorV1 public executor;

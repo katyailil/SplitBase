@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {RegistryV1} from "../src/RegistryV1.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts-upgradeable/proxy/ERC1967/ERC1967Proxy.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 contract RegistryV1Test is Test {
     RegistryV1 public registry;
