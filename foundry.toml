@@ -11,6 +11,13 @@ remappings = [
     "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/"
 ]
 fs_permissions = [{ access = "read-write", path = "./deployments" }]
+gas_reports = ["SplitBaseV1", "RegistryV1", "ExecutorV1"]
+
+[fuzz]
+runs = 256
+
+[invariant]
+runs = 256
 
 [rpc_endpoints]
 base = "https://mainnet.base.org"
