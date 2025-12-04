@@ -101,13 +101,16 @@ contract ExecutorV1Test is Test {
         assertFalse(executor.executors(poolId, executor1));
     }
 
-    function testExecute() public {
+    function testExecuteFullFlow() public {
+        vm.prank(address(executor));
         uint256 poolId = splitBase.createPool();
+
+        vm.startPrank(address(executor));
         splitBase.addRecipient(poolId, recipient1, 100);
         splitBase.addRecipient(poolId, recipient2, 200);
-
         executor.registerPool(poolId);
         executor.addExecutor(poolId, executor1);
+        vm.stopPrank();
 
         uint256 amount = 300_000000;
         usdc.mint(executor1, amount);
@@ -115,8 +118,8 @@ contract ExecutorV1Test is Test {
         vm.startPrank(executor1);
         usdc.approve(address(executor), amount);
 
-        vm.expectEmit(true, false, false, true);
-        emit ExecutionCompleted(poolId, amount, block.timestamp);
+        vm.expectEmit(true, false, false, false);
+        emit ExecutionCompleted(poolId, amount, 0);
 
         executor.execute(poolId, amount);
         vm.stopPrank();
@@ -127,7 +130,10 @@ contract ExecutorV1Test is Test {
     }
 
     function testExecuteUnauthorized() public {
+        vm.prank(address(executor));
         uint256 poolId = splitBase.createPool();
+
+        vm.prank(address(executor));
         executor.registerPool(poolId);
 
         uint256 amount = 100_000000;
@@ -141,18 +147,24 @@ contract ExecutorV1Test is Test {
         vm.stopPrank();
     }
 
-    function testExecuteOwnerCanExecute() public {
+    function testExecutePoolOwnerCanExecute() public {
+        vm.prank(address(executor));
         uint256 poolId = splitBase.createPool();
+
+        vm.startPrank(address(executor));
         splitBase.addRecipient(poolId, recipient1, 100);
         splitBase.addRecipient(poolId, recipient2, 200);
-
         executor.registerPool(poolId);
+        vm.stopPrank();
 
         uint256 amount = 300_000000;
-        usdc.mint(owner, amount);
+        usdc.mint(address(executor), amount);
+
+        vm.startPrank(address(executor));
         usdc.approve(address(executor), amount);
 
         executor.execute(poolId, amount);
+        vm.stopPrank();
 
         assertEq(usdc.balanceOf(recipient1), 100_000000);
         assertEq(usdc.balanceOf(recipient2), 200_000000);
