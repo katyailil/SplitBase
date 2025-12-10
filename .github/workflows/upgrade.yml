@@ -25,22 +25,31 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Deploy new implementation
+      - name: Upgrade to SplitBaseV2
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
           PROXY_ADDRESS: ${{ inputs.proxy_address }}
         run: |
-          echo "Deploying new implementation..."
-          forge script script/DeployProxy.s.sol \
+          echo "🚀 Upgrading SplitBase to V2..."
+          echo "Network: ${{ inputs.network }}"
+          echo "Proxy: $PROXY_ADDRESS"
+
+          forge script script/UpgradeToV2.s.sol \
             --rpc-url ${{ inputs.network }} \
             --broadcast \
             --verify \
             -vvvv
 
-          echo "⚠️  Manual upgrade required:"
-          echo "Call upgradeToAndCall() on proxy at $PROXY_ADDRESS"
-          echo "with new implementation address from deployment"
+          echo ""
+          echo "✅ Upgrade complete!"
+          echo "Proxy $PROXY_ADDRESS now runs SplitBaseV2"
+          echo ""
+          echo "New V2 features available:"
+          echo "- Bucket categorization (TEAM, INVESTORS, TREASURY, etc.)"
+          echo "- Revenue source tracking (BASE_PAY, PROTOCOL_FEES, etc.)"
+          echo "- Distribution history with full metadata"
+          echo "- getBucketRecipients() and getBucketTotalShares()"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
