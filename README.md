@@ -17,17 +17,26 @@ High-precision share calculations ensure accurate distribution across all recipi
 ## Architecture
 
 - **Core Pool Logic**: Dynamic recipient configurations with percentage/unit-based shares
+- **Bucket Semantics**: Structured categorization (TEAM, INVESTORS, TREASURY, etc.)
+- **Source Tracking**: Revenue attribution (Base Pay, protocol fees, grants, etc.)
 - **Registry**: Centralized pool management and discovery
 - **Executor**: Base Pay integration for automated execution flows
 - **Upgradeability**: UUPS proxy pattern with static addresses
 
+**📚 Documentation:**
+- [Architecture Guide](./docs/ARCHITECTURE.md) - Technical architecture and integration patterns
+- [Domain Model](./docs/DOMAIN_MODEL.md) - Business concepts explained for non-developers
+
 ## Features
 
 - Create and manage payout pools with flexible share models
+- **Bucket categorization** (TEAM, INVESTORS, TREASURY, REFERRALS, SECURITY_FUND, GRANTS)
+- **Revenue source tracking** (Base Pay, protocol fees, grants, donations, partnerships)
+- **Distribution history** with full on-chain audit trail
 - Execute distribution cycles with precise accounting
 - Support for Base smart wallets and sub-accounts
-- Full upgradeability without address changes
-- Event emissions optimized for Subgraph indexing
+- Full upgradeability without address changes (V1 → V2 compatible)
+- Event emissions optimized for Subgraph indexing and analytics dashboards
 - Gas-optimized execution for cost-effective operations
 
 ## Development

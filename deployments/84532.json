@@ -6,7 +6,10 @@
   "network": "base-sepolia",
   "registryImplementation": "0x34aec145B7b2a0922112545C8D9bC20bd551F901",
   "registryProxy": "0xF0f141DeB225D9D4639dF1E6E91bE4bC90EDD5eE",
-  "splitBaseImplementation": "0xc41b9c958109ebcD0Ff3794C30D4d151490a2975",
+  "splitBaseImplementation": "0x2Ca555A7ACFE2da02099A6d950b8665A65f5c861",
+  "splitBaseImplementationV1": "0xc41b9c958109ebcD0Ff3794C30D4d151490a2975",
   "splitBaseProxy": "0x62B52D21db12E4A709a49c043e31adfdAB41FB39",
+  "version": "V2",
+  "upgradedAt": 1733845200,
   "timestamp": 1764058302
 }

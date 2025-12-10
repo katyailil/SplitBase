@@ -50,7 +50,7 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
-    function createPool() external returns (uint256 poolId) {
+    function createPool() public returns (uint256 poolId) {
         poolId = _nextPoolId++;
         _pools[poolId] = Pool({
             owner: msg.sender,
@@ -64,7 +64,7 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
     }
 
     function addRecipient(uint256 poolId, address recipient, uint256 shares)
-        external
+        public
         onlyPoolOwner(poolId)
         poolExists(poolId)
     {
@@ -81,7 +81,7 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
     }
 
     function updateRecipient(uint256 poolId, address recipient, uint256 newShares)
-        external
+        public
         onlyPoolOwner(poolId)
         poolExists(poolId)
     {
@@ -111,7 +111,7 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
     }
 
     function executePayout(uint256 poolId, uint256 amount)
-        external
+        public
         onlyPoolOwner(poolId)
         poolExists(poolId)
         activePool(poolId)
@@ -149,15 +149,15 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
         emit PoolStatusChanged(poolId, active);
     }
 
-    function getPool(uint256 poolId) external view returns (Pool memory) {
+    function getPool(uint256 poolId) public view returns (Pool memory) {
         return _pools[poolId];
     }
 
-    function getRecipient(uint256 poolId, address recipient) external view returns (Recipient memory) {
+    function getRecipient(uint256 poolId, address recipient) public view returns (Recipient memory) {
         return _recipients[poolId][recipient];
     }
 
-    function getRecipientList(uint256 poolId) external view returns (address[] memory) {
+    function getRecipientList(uint256 poolId) public view returns (address[] memory) {
         return _recipientList[poolId];
     }
 }
