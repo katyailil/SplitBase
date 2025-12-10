@@ -3,16 +3,24 @@ name: Upgrade Contracts
 on:
   workflow_dispatch:
     inputs:
+      contract:
+        description: 'Contract to upgrade'
+        required: true
+        type: choice
+        options:
+          - SplitBase
+          - Registry
+          - Executor
       network:
-        description: 'Network (same as deployment)'
+        description: 'Network'
         required: true
         type: choice
         options:
           - base_sepolia
           - base
       proxy_address:
-        description: 'Proxy contract address (not implementation!)'
-        required: true
+        description: 'Proxy contract address (optional - auto-detected from deployments/)'
+        required: false
 
 jobs:
   upgrade:
@@ -25,17 +33,44 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
 
-      - name: Upgrade to SplitBaseV2
+      - name: Determine proxy address
+        id: proxy
+        run: |
+          CHAIN_ID=${{ inputs.network == 'base' && '8453' || '84532' }}
+          CONTRACT_LOWER=$(echo "${{ inputs.contract }}" | tr '[:upper:]' '[:lower:]')
+
+          if [ -n "${{ inputs.proxy_address }}" ]; then
+            PROXY="${{ inputs.proxy_address }}"
+          else
+            PROXY=$(jq -r ".${CONTRACT_LOWER}Proxy" deployments/${CHAIN_ID}.json)
+          fi
+
+          echo "proxy_address=$PROXY" >> $GITHUB_OUTPUT
+          echo "📍 Proxy address: $PROXY"
+
+      - name: Upgrade contract
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
           BASESCAN_API_KEY: ${{ secrets.BASESCAN_API_KEY }}
-          PROXY_ADDRESS: ${{ inputs.proxy_address }}
+          PROXY_ADDRESS: ${{ steps.proxy.outputs.proxy_address }}
         run: |
-          echo "🚀 Upgrading SplitBase to V2..."
+          echo "🚀 Upgrading ${{ inputs.contract }}..."
           echo "Network: ${{ inputs.network }}"
           echo "Proxy: $PROXY_ADDRESS"
 
-          forge script script/UpgradeToV2.s.sol \
+          case "${{ inputs.contract }}" in
+            SplitBase)
+              SCRIPT="script/UpgradeToV2.s.sol"
+              ;;
+            Registry)
+              SCRIPT="script/Upgrade.s.sol"
+              ;;
+            Executor)
+              SCRIPT="script/Upgrade.s.sol"
+              ;;
+          esac
+
+          forge script $SCRIPT \
             --rpc-url ${{ inputs.network }} \
             --broadcast \
             --verify \
@@ -43,13 +78,7 @@ jobs:
 
           echo ""
           echo "✅ Upgrade complete!"
-          echo "Proxy $PROXY_ADDRESS now runs SplitBaseV2"
-          echo ""
-          echo "New V2 features available:"
-          echo "- Bucket categorization (TEAM, INVESTORS, TREASURY, etc.)"
-          echo "- Revenue source tracking (BASE_PAY, PROTOCOL_FEES, etc.)"
-          echo "- Distribution history with full metadata"
-          echo "- getBucketRecipients() and getBucketTotalShares()"
+          echo "Proxy $PROXY_ADDRESS upgraded successfully"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
