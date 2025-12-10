@@ -6,7 +6,10 @@
   "network": "base",
   "registryImplementation": "0x4125d418Fe36a755F5eEB7c502ca3e00750cDDd8",
   "registryProxy": "0xEa10580212A12c98eE0ebACbBC595af2062a81B0",
-  "splitBaseImplementation": "0xC680FA2Ba45f01B84E7962cBbe8cDc98dD20Ad72",
+  "splitBaseImplementation": "0x13A8f49C41133A2f3D5E6cbb18626EE242b0E4f4",
+  "splitBaseImplementationV1": "0xC680FA2Ba45f01B84E7962cBbe8cDc98dD20Ad72",
   "splitBaseProxy": "0x9A1f27779561269Ac8bFFdd152D1F8f2C445FC3e",
+  "version": "V2",
+  "upgradedAt": 1733845200,
   "timestamp": 1764058313
 }
