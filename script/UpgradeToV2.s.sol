@@ -24,14 +24,10 @@ contract UpgradeToV2Script is Script {
 
         vm.stopBroadcast();
 
-        console.log("\nVerification command:");
-        console.log(
-            "forge verify-contract",
-            address(newImplementation),
-            "src/SplitBaseV2.sol:SplitBaseV2",
-            "--chain-id",
-            block.chainid,
-            "--watch"
-        );
+        console.log("\n=== Verification Command ===");
+        console.log("forge verify-contract");
+        console.log("  Address:", address(newImplementation));
+        console.log("  Contract: src/SplitBaseV2.sol:SplitBaseV2");
+        console.log("  Chain ID:", block.chainid);
     }
 }
