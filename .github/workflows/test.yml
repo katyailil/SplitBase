@@ -16,5 +16,10 @@ jobs:
           rm -rf lib/openzeppelin-contracts lib/openzeppelin-contracts-upgradeable
           forge install OpenZeppelin/openzeppelin-contracts
           forge install OpenZeppelin/openzeppelin-contracts-upgradeable
+      - name: Verify OZ deps present
+        run: |
+          ls -la lib
+          test -f lib/openzeppelin-contracts-upgradeable/contracts/security/PausableUpgradeable.sol
+          test -f lib/openzeppelin-contracts-upgradeable/contracts/security/ReentrancyGuardUpgradeable.sol
       - name: Run tests
         run: forge test -vvv
