@@ -24,10 +24,16 @@ jobs:
             rm -rf lib/openzeppelin-contracts
             git clone --depth 1 --branch v4.9.6 https://github.com/OpenZeppelin/openzeppelin-contracts lib/openzeppelin-contracts
           fi
+          if [ ! -f lib/forge-std/src/Test.sol ]; then
+            rm -rf lib/forge-std
+            git clone --depth 1 --branch v1.9.6 https://github.com/foundry-rs/forge-std lib/forge-std
+          fi
           ls -la lib
           ls -la lib/openzeppelin-contracts-upgradeable/contracts/security
           ls -la lib/openzeppelin-contracts/contracts/security
+          ls -la lib/forge-std/src
           test -f lib/openzeppelin-contracts-upgradeable/contracts/security/PausableUpgradeable.sol
           test -f lib/openzeppelin-contracts-upgradeable/contracts/security/ReentrancyGuardUpgradeable.sol
+          test -f lib/forge-std/src/Test.sol
       - name: Run tests
         run: forge test -vvv
