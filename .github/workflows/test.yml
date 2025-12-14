@@ -11,6 +11,10 @@ jobs:
           submodules: recursive
       - name: Ensure submodules
         run: git submodule update --init --recursive
+      - name: Ensure OZ deps
+        run: |
+          [ -d lib/openzeppelin-contracts ] || forge install OpenZeppelin/openzeppelin-contracts
+          [ -d lib/openzeppelin-contracts-upgradeable ] || forge install OpenZeppelin/openzeppelin-contracts-upgradeable
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
       - name: Run tests
