@@ -4,32 +4,45 @@ pragma solidity ^0.8.28;
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import {IERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/IERC20Upgradeable.sol";
+import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import {ISplitBase} from "./interfaces/ISplitBase.sol";
-import {IERC20} from "./interfaces/IERC20.sol";
 
-contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISplitBase {
+contract SplitBaseV1 is
+    Initializable,
+    UUPSUpgradeable,
+    OwnableUpgradeable,
+    PausableUpgradeable,
+    ReentrancyGuardUpgradeable,
+    ISplitBase
+{
+    using SafeERC20Upgradeable for IERC20Upgradeable;
+
     error Unauthorized();
     error InvalidPool();
     error InvalidRecipient();
     error InvalidShares();
+    error InvalidAmount();
     error InsufficientBalance();
     error PoolInactive();
     error TransferFailed();
 
-    IERC20 public usdc;
+    IERC20Upgradeable public usdc;
     uint256 private _nextPoolId;
 
     mapping(uint256 => Pool) private _pools;
     mapping(uint256 => mapping(address => Recipient)) private _recipients;
     mapping(uint256 => address[]) private _recipientList;
 
-    modifier onlyPoolOwner(uint256 poolId) {
-        if (_pools[poolId].owner != msg.sender) revert Unauthorized();
+    modifier poolExists(uint256 poolId) {
+        if (_pools[poolId].owner == address(0)) revert InvalidPool();
         _;
     }
 
-    modifier poolExists(uint256 poolId) {
-        if (_pools[poolId].owner == address(0)) revert InvalidPool();
+    modifier onlyPoolOwner(uint256 poolId) {
+        if (_pools[poolId].owner != msg.sender) revert Unauthorized();
         _;
     }
 
@@ -44,13 +57,23 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
 
     function initialize(address _usdc) external initializer {
         __Ownable_init(msg.sender);
-        usdc = IERC20(_usdc);
+        __Pausable_init();
+        __ReentrancyGuard_init();
+        usdc = IERC20Upgradeable(_usdc);
         _nextPoolId = 1;
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
-    function createPool() public returns (uint256 poolId) {
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function createPool() public whenNotPaused returns (uint256 poolId) {
         poolId = _nextPoolId++;
         _pools[poolId] = Pool({
             owner: msg.sender,
@@ -65,8 +88,9 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
 
     function addRecipient(uint256 poolId, address recipient, uint256 shares)
         public
-        onlyPoolOwner(poolId)
         poolExists(poolId)
+        onlyPoolOwner(poolId)
+        whenNotPaused
     {
         if (recipient == address(0)) revert InvalidRecipient();
         if (shares == 0) revert InvalidShares();
@@ -82,8 +106,9 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
 
     function updateRecipient(uint256 poolId, address recipient, uint256 newShares)
         public
-        onlyPoolOwner(poolId)
         poolExists(poolId)
+        onlyPoolOwner(poolId)
+        whenNotPaused
     {
         if (_recipients[poolId][recipient].account == address(0)) revert InvalidRecipient();
         if (newShares == 0) revert InvalidShares();
@@ -97,8 +122,9 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
 
     function removeRecipient(uint256 poolId, address recipient)
         external
-        onlyPoolOwner(poolId)
         poolExists(poolId)
+        onlyPoolOwner(poolId)
+        whenNotPaused
     {
         if (_recipients[poolId][recipient].account == address(0)) revert InvalidRecipient();
 
@@ -112,24 +138,28 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
 
     function executePayout(uint256 poolId, uint256 amount)
         public
-        onlyPoolOwner(poolId)
+        whenNotPaused
+        nonReentrant
         poolExists(poolId)
+        onlyPoolOwner(poolId)
         activePool(poolId)
+        returns (uint256 distributed)
     {
-        if (amount == 0) revert InvalidShares();
+        if (amount == 0) revert InvalidAmount();
         if (_pools[poolId].totalShares == 0) revert InvalidShares();
 
         Pool storage pool = _pools[poolId];
         address[] memory recipients = _recipientList[poolId];
-        uint256 distributed = 0;
+        uint256 activeRecipients;
 
         for (uint256 i = 0; i < recipients.length; i++) {
             Recipient memory r = _recipients[poolId][recipients[i]];
             if (!r.active) continue;
+            activeRecipients++;
 
             uint256 share = (amount * r.shares) / pool.totalShares;
             if (share > 0) {
-                if (!usdc.transferFrom(msg.sender, r.account, share)) revert TransferFailed();
+                usdc.safeTransferFrom(msg.sender, r.account, share);
                 distributed += share;
             }
         }
@@ -137,13 +167,13 @@ contract SplitBaseV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, ISpl
         pool.lastExecutionTime = block.timestamp;
         pool.totalDistributed += distributed;
 
-        emit PayoutExecuted(poolId, distributed, pool.recipientCount);
+        emit PayoutExecuted(poolId, msg.sender, address(usdc), amount, distributed, activeRecipients);
     }
 
     function setPoolStatus(uint256 poolId, bool active)
         external
-        onlyPoolOwner(poolId)
         poolExists(poolId)
+        onlyPoolOwner(poolId)
     {
         _pools[poolId].active = active;
         emit PoolStatusChanged(poolId, active);

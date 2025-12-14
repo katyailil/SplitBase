@@ -155,6 +155,12 @@ contract RegistryV1Test is Test {
         assertEq(registry.getPoolCount(), 3);
     }
 
+    function testPauseBlocksRegister() public {
+        registry.pause();
+        vm.expectRevert("Pausable: paused");
+        registry.register(poolContract1, 1, "Pool 1");
+    }
+
     function testUpgradeAuthorization() public {
         RegistryV1 newImplementation = new RegistryV1();
 

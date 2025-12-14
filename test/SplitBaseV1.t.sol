@@ -22,7 +22,14 @@ contract SplitBaseV1Test is Test {
     event RecipientAdded(uint256 indexed poolId, address indexed recipient, uint256 shares);
     event RecipientUpdated(uint256 indexed poolId, address indexed recipient, uint256 newShares);
     event RecipientRemoved(uint256 indexed poolId, address indexed recipient);
-    event PayoutExecuted(uint256 indexed poolId, uint256 totalAmount, uint256 recipientCount);
+    event PayoutExecuted(
+        uint256 indexed poolId,
+        address indexed payer,
+        address indexed token,
+        uint256 requestedAmount,
+        uint256 distributedAmount,
+        uint256 recipientCount
+    );
     event PoolStatusChanged(uint256 indexed poolId, bool active);
 
     function setUp() public {
@@ -174,14 +181,15 @@ contract SplitBaseV1Test is Test {
         usdc.mint(owner, payoutAmount);
         usdc.approve(address(splitBase), payoutAmount);
 
-        vm.expectEmit(true, false, false, true);
-        emit PayoutExecuted(poolId, payoutAmount, 3);
+        vm.expectEmit(true, true, true, true);
+        emit PayoutExecuted(poolId, owner, address(usdc), payoutAmount, payoutAmount, 3);
 
-        splitBase.executePayout(poolId, payoutAmount);
+        uint256 distributed = splitBase.executePayout(poolId, payoutAmount);
 
         assertEq(usdc.balanceOf(recipient1), 100_000000);
         assertEq(usdc.balanceOf(recipient2), 200_000000);
         assertEq(usdc.balanceOf(recipient3), 300_000000);
+        assertEq(distributed, payoutAmount);
 
         ISplitBase.Pool memory pool = splitBase.getPool(poolId);
         assertGt(pool.lastExecutionTime, 0);
@@ -198,7 +206,7 @@ contract SplitBaseV1Test is Test {
         usdc.mint(owner, payoutAmount);
         usdc.approve(address(splitBase), payoutAmount);
 
-        splitBase.executePayout(poolId, payoutAmount);
+        uint256 distributed = splitBase.executePayout(poolId, payoutAmount);
 
         uint256 r1Balance = usdc.balanceOf(recipient1);
         uint256 r2Balance = usdc.balanceOf(recipient2);
@@ -210,6 +218,7 @@ contract SplitBaseV1Test is Test {
 
         uint256 totalDistributed = r1Balance + r2Balance + r3Balance;
         assertEq(totalDistributed, 1_000000);
+        assertEq(distributed, totalDistributed);
     }
 
     function testExecutePayoutInactivePool() public {
@@ -222,6 +231,20 @@ contract SplitBaseV1Test is Test {
         usdc.approve(address(splitBase), payoutAmount);
 
         vm.expectRevert(SplitBaseV1.PoolInactive.selector);
+        splitBase.executePayout(poolId, payoutAmount);
+    }
+
+    function testPauseBlocksPayout() public {
+        uint256 poolId = splitBase.createPool();
+        splitBase.addRecipient(poolId, recipient1, 100);
+
+        uint256 payoutAmount = 100_000000;
+        usdc.mint(owner, payoutAmount);
+        usdc.approve(address(splitBase), payoutAmount);
+
+        splitBase.pause();
+
+        vm.expectRevert("Pausable: paused");
         splitBase.executePayout(poolId, payoutAmount);
     }
 

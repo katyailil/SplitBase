@@ -21,7 +21,14 @@ contract ExecutorV1Test is Test {
     address public recipient2 = address(0x4);
 
     event ExecutionScheduled(uint256 indexed poolId, address indexed executor, uint256 amount, uint256 scheduledAt);
-    event ExecutionCompleted(uint256 indexed poolId, uint256 amount, uint256 executedAt);
+    event ExecutionCompleted(
+        uint256 indexed poolId,
+        address indexed payer,
+        address indexed token,
+        uint256 requestedAmount,
+        uint256 distributedAmount,
+        uint256 executedAt
+    );
     event ExecutorAdded(uint256 indexed poolId, address indexed executor);
     event ExecutorRemoved(uint256 indexed poolId, address indexed executor);
 
@@ -118,8 +125,8 @@ contract ExecutorV1Test is Test {
         vm.startPrank(executor1);
         usdc.approve(address(executor), amount);
 
-        vm.expectEmit(true, false, false, false);
-        emit ExecutionCompleted(poolId, amount, 0);
+        vm.expectEmit(true, true, true, true);
+        emit ExecutionCompleted(poolId, executor1, address(usdc), amount, amount, block.timestamp);
 
         executor.execute(poolId, amount);
         vm.stopPrank();
@@ -182,6 +189,28 @@ contract ExecutorV1Test is Test {
         emit ExecutionScheduled(poolId, executor1, amount, block.timestamp);
 
         executor.scheduleExecution(poolId, amount);
+    }
+
+    function testPauseBlocksExecute() public {
+        vm.prank(address(executor));
+        uint256 poolId = splitBase.createPool();
+
+        vm.startPrank(address(executor));
+        splitBase.addRecipient(poolId, recipient1, 100);
+        executor.registerPool(poolId);
+        executor.addExecutor(poolId, executor1);
+        vm.stopPrank();
+
+        uint256 amount = 100_000000;
+        usdc.mint(executor1, amount);
+
+        executor.pause();
+
+        vm.startPrank(executor1);
+        usdc.approve(address(executor), amount);
+        vm.expectRevert("Pausable: paused");
+        executor.execute(poolId, amount);
+        vm.stopPrank();
     }
 
     function testScheduleExecutionUnauthorized() public {
