@@ -24,7 +24,7 @@ contract RegistryV1Test is Test {
             address(implementation),
             abi.encodeCall(RegistryV1.initialize, ())
         );
-        registry = RegistryV1(address(proxy));
+        registry = RegistryV1(payable(address(proxy)));
     }
 
     function testInitialize() public view {

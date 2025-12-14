@@ -40,14 +40,14 @@ contract ExecutorV1Test is Test {
             address(splitBaseImpl),
             abi.encodeCall(SplitBaseV1.initialize, (address(usdc)))
         );
-        splitBase = SplitBaseV1(address(splitBaseProxy));
+        splitBase = SplitBaseV1(payable(address(splitBaseProxy)));
 
         ExecutorV1 executorImpl = new ExecutorV1();
         ERC1967Proxy executorProxy = new ERC1967Proxy(
             address(executorImpl),
             abi.encodeCall(ExecutorV1.initialize, (address(splitBase), address(usdc)))
         );
-        executor = ExecutorV1(address(executorProxy));
+        executor = ExecutorV1(payable(address(executorProxy)));
     }
 
     function testInitialize() public view {

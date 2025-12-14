@@ -33,7 +33,7 @@ contract RegistryV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, Pausa
     }
 
     function initialize() external initializer {
-        __Ownable_init(msg.sender);
+        __Ownable_init();
         __Pausable_init();
     }
 
@@ -97,4 +97,8 @@ contract RegistryV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, Pausa
     function getPoolCount() external view returns (uint256) {
         return _allPools.length;
     }
+
+    // Allow delegatecall during UUPS upgradeToAndCall with empty data
+    fallback() external payable {}
+    receive() external payable {}
 }

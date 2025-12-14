@@ -59,7 +59,7 @@ contract SplitBaseV2Test is Test {
             address(implementation),
             abi.encodeCall(implementation.initialize, (address(usdc)))
         );
-        splitBase = SplitBaseV2(address(proxy));
+        splitBase = SplitBaseV2(payable(address(proxy)));
     }
 
     function testCreatePoolV2() public {

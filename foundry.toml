@@ -9,7 +9,8 @@ via_ir = false
 evm_version = "cancun"
 remappings = [
     "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
-    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
+    "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "forge-std/=lib/forge-std/src/"
 ]
 fs_permissions = [{ access = "read-write", path = "./deployments" }]
 gas_reports = ["SplitBaseV1", "RegistryV1", "ExecutorV1"]

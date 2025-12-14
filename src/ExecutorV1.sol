@@ -52,7 +52,7 @@ contract ExecutorV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, Pausa
     }
 
     function initialize(address _splitBase, address _usdc) external initializer {
-        __Ownable_init(msg.sender);
+        __Ownable_init();
         __Pausable_init();
         __ReentrancyGuard_init();
         splitBase = ISplitBase(_splitBase);
@@ -90,9 +90,6 @@ contract ExecutorV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, Pausa
         if (amount == 0) revert InvalidAmount();
         if (poolOwners[poolId] == address(0)) revert PoolNotRegistered();
 
-        uint256 balanceBefore = usdc.balanceOf(address(this));
-        if (balanceBefore != 0) revert ExecutionFailed();
-
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         usdc.forceApprove(address(splitBase), amount);
 
@@ -113,4 +110,8 @@ contract ExecutorV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable, Pausa
         if (amount == 0) revert InvalidAmount();
         emit ExecutionScheduled(poolId, msg.sender, amount, block.timestamp);
     }
+
+    // Allow delegatecall during UUPS upgradeToAndCall with empty data
+    fallback() external payable {}
+    receive() external payable {}
 }

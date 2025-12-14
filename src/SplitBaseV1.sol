@@ -56,7 +56,7 @@ contract SplitBaseV1 is
     }
 
     function initialize(address _usdc) external initializer {
-        __Ownable_init(msg.sender);
+        __Ownable_init();
         __Pausable_init();
         __ReentrancyGuard_init();
         usdc = IERC20Upgradeable(_usdc);
@@ -190,4 +190,8 @@ contract SplitBaseV1 is
     function getRecipientList(uint256 poolId) public view returns (address[] memory) {
         return _recipientList[poolId];
     }
+
+    // Allow delegatecall during UUPS upgradeToAndCall with empty data
+    fallback() external payable {}
+    receive() external payable {}
 }

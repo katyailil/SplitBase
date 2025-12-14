@@ -7,7 +7,7 @@ import {SplitBaseV2} from "../src/SplitBaseV2.sol";
 contract UpgradeToV2Script is Script {
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        address proxyAddress = vm.envAddress("PROXY_ADDRESS");
+        address payable proxyAddress = payable(vm.envAddress("PROXY_ADDRESS"));
 
         console.log("Upgrading to SplitBaseV2...");
         console.log("Proxy address:", proxyAddress);

@@ -105,13 +105,13 @@ contract SplitBase is ISplitBase {
         onlyPoolOwner(poolId)
         poolExists(poolId)
         activePool(poolId)
+        returns (uint256 distributed)
     {
         if (amount == 0) revert InvalidShares();
         if (_pools[poolId].totalShares == 0) revert InvalidShares();
 
         Pool storage pool = _pools[poolId];
         address[] memory recipients = _recipientList[poolId];
-        uint256 distributed = 0;
 
         for (uint256 i = 0; i < recipients.length; i++) {
             Recipient memory r = _recipients[poolId][recipients[i]];
@@ -127,7 +127,7 @@ contract SplitBase is ISplitBase {
         pool.lastExecutionTime = block.timestamp;
         pool.totalDistributed += distributed;
 
-        emit PayoutExecuted(poolId, distributed, pool.recipientCount);
+        emit PayoutExecuted(poolId, msg.sender, address(usdc), amount, distributed, pool.recipientCount);
     }
 
     function setPoolStatus(uint256 poolId, bool active)
