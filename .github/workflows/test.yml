@@ -12,12 +12,21 @@ jobs:
           fetch-depth: 0
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
-      - name: Sync submodules
+      - name: Fetch OZ deps
         run: |
           git submodule sync --recursive
-          git submodule update --init --recursive --depth 1
+          git submodule update --init --recursive --depth 1 || true
+          if [ ! -f lib/openzeppelin-contracts-upgradeable/contracts/security/PausableUpgradeable.sol ]; then
+            rm -rf lib/openzeppelin-contracts-upgradeable
+            git clone --depth 1 --branch v4.9.6 https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable lib/openzeppelin-contracts-upgradeable
+          fi
+          if [ ! -f lib/openzeppelin-contracts/contracts/security/ReentrancyGuard.sol ]; then
+            rm -rf lib/openzeppelin-contracts
+            git clone --depth 1 --branch v4.9.6 https://github.com/OpenZeppelin/openzeppelin-contracts lib/openzeppelin-contracts
+          fi
           ls -la lib
           ls -la lib/openzeppelin-contracts-upgradeable/contracts/security
+          ls -la lib/openzeppelin-contracts/contracts/security
           test -f lib/openzeppelin-contracts-upgradeable/contracts/security/PausableUpgradeable.sol
           test -f lib/openzeppelin-contracts-upgradeable/contracts/security/ReentrancyGuardUpgradeable.sol
       - name: Run tests
